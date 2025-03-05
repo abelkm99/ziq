@@ -6,6 +6,7 @@ https://github.com/user-attachments/assets/f62c4db8-01ba-4b7a-9762-718095f0d4a4
 
 ### Prerequisites
 
+
 * **jq**: a powerful command-line JSON processor. If you don’t have `jq` installed, you can download it from the [official website](https://stedolan.github.io/jq/download/) or use your package manager:
 
   ```bash
