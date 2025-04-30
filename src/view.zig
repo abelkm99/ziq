@@ -8,13 +8,53 @@ const std = @import("std");
 const App = @import("app.zig").App;
 const THROTTLE_INTERVAL = 30;
 const CURSOR_JUMP = 2;
+const ERROR_RATIO = NormalizedStruct{
+    .nx = 0.7,
+    .ny = 0.3,
+    .nw = 0.3,
+    .nh = 0.5,
+};
+
+const NormalizedStruct = struct {
+    nx: f32,
+    ny: f32,
+    nw: f32,
+    nh: f32,
+};
 
 cursor_loc: c_int = 0,
 tickit: *t.Tickit,
 root: *t.TickitWindow,
 command_window: *t.TickitWindow,
+errorWindow: *t.TickitWindow,
 resultWindow: *t.TickitWindow,
 last_scroll_event: i64 = 0,
+state: bool = true,
+
+fn normalizeWindow(
+    parentRect: t.TickitRect,
+    normalizedRect: NormalizedStruct,
+) t.TickitRect {
+    const parent_top_f: f32 = @floatFromInt(parentRect.top);
+    const parent_left_f: f32 = @floatFromInt(parentRect.left);
+    const parent_lines_f: f32 = @floatFromInt(parentRect.lines);
+    const parent_cols_f: f32 = @floatFromInt(parentRect.cols);
+
+    // Perform calculations using floating-point numbers
+    const child_top_f = parent_top_f + (parent_lines_f * normalizedRect.ny);
+    const child_left_f = parent_left_f + (parent_cols_f * normalizedRect.nx);
+    const child_lines_f = parent_lines_f * normalizedRect.nh;
+    const child_cols_f = parent_cols_f * normalizedRect.nw;
+
+    // Convert the final float results back to c_int for the TickitRect
+    // @intFromFloat truncates (cuts off the decimal)
+    return t.TickitRect{
+        .top = @intFromFloat(child_top_f),
+        .left = @intFromFloat(child_left_f),
+        .lines = @intFromFloat(child_lines_f),
+        .cols = @intFromFloat(child_cols_f),
+    };
+}
 
 fn keyboardClickEventHandler(
     _: ?*t.TickitWindow,
@@ -44,6 +84,18 @@ fn keyboardClickEventHandler(
     const command = ctx.command.all();
 
     std.log.debug("command is {s}", .{command});
+    ctx.processCommand(command) catch {
+        std.log.err("error processing command", .{});
+    };
+
+    if (ctx.stderr_buffer.?.len > 0) {
+        std.debug.print("---> std error is {?s}", .{ctx.stderr_buffer});
+        t.tickit_window_show(ctx.view.?.errorWindow);
+    } else {
+        t.tickit_window_hide(ctx.view.?.errorWindow);
+    }
+    t.tickit_window_expose(ctx.view.?.resultWindow, null);
+    t.tickit_window_expose(ctx.view.?.errorWindow, null);
     t.tickit_window_expose(ctx.view.?.command_window, null);
 
     return 1;
@@ -135,7 +187,126 @@ fn mouseEventHandler(
     return 1;
 }
 
-fn childWindowExposeHandler(
+fn onErrorWindowExposeHandler(
+    win: ?*t.TickitWindow,
+    _: t.TickitEventFlags,
+    _info: ?*anyopaque,
+    _ctx: ?*anyopaque,
+) callconv(.c) c_int {
+    const info: *t.TickitExposeEventInfo = if (_info != null) @ptrCast(@alignCast(_info)) else {
+        return 0;
+    };
+
+    const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
+        return 0;
+    };
+
+    const rb = info.rb.?;
+
+    t.tickit_renderbuffer_clear(rb);
+
+    {
+        const pen: *t.TickitPen = t.tickit_pen_new().?;
+        defer t.tickit_pen_unref(pen);
+
+        t.tickit_pen_set_colour_attr(pen, t.TICKIT_PEN_FG, 1);
+        t.tickit_renderbuffer_setpen(rb, pen);
+
+        const lines: c_int = t.tickit_window_lines(win);
+        const cols: c_int = t.tickit_window_cols(win);
+
+        t.tickit_renderbuffer_goto(rb, 0, 0);
+        _ = t.tickit_renderbuffer_text(rb, "┌");
+        t.tickit_renderbuffer_goto(rb, 0, cols - 1);
+        _ = t.tickit_renderbuffer_text(rb, "┐");
+        t.tickit_renderbuffer_goto(rb, lines - 1, 0);
+        _ = t.tickit_renderbuffer_text(rb, "└");
+        t.tickit_renderbuffer_goto(rb, lines - 1, cols - 1);
+        _ = t.tickit_renderbuffer_text(rb, "┘");
+
+        t.tickit_renderbuffer_hline_at(
+            rb,
+            0,
+            1,
+            cols - 2,
+            t.TICKIT_LINE_SINGLE,
+            0,
+        );
+        t.tickit_renderbuffer_hline_at(
+            rb,
+            lines - 1,
+            1,
+            cols - 2,
+            t.TICKIT_LINE_SINGLE,
+            0,
+        );
+
+        t.tickit_renderbuffer_vline_at(
+            rb,
+            1,
+            lines - 2,
+            0,
+            t.TICKIT_LINE_SINGLE,
+            0,
+        );
+        t.tickit_renderbuffer_vline_at(
+            rb,
+            1,
+            lines - 2,
+            cols - 1,
+            t.TICKIT_LINE_SINGLE,
+            0,
+        );
+
+        const error_lines: usize = @intCast(t.tickit_window_lines(ctx.view.?.errorWindow));
+        if (error_lines <= 0) {
+            return 1;
+        }
+        var idx: u16 = 1;
+        std.debug.print("rendering error\n", .{});
+        for (ctx.errorBuffer.?) |row| {
+            // even for 1 i could go twice
+            if (row.len == 0) {
+                continue;
+            }
+
+            var j: usize = 0;
+            const cp = ctx.alloc.dupe(u8, row) catch {
+                continue;
+            };
+            defer ctx.alloc.free(cp);
+            std.debug.print("==== rendeing row\n", .{});
+            while (j < row.len) {
+                std.debug.print("==== value cp[0..3] -> {s}\n", .{cp[0..2]});
+                _ = t.tickit_renderbuffer_textn_at(
+                    rb,
+                    @intCast(idx),
+                    1,
+                    cp[j..].ptr,
+                    error_lines,
+                );
+                j += error_lines;
+                idx += 1;
+            }
+
+            idx += 2;
+
+            // break
+
+        }
+    }
+
+    // Draw border lines
+    // Horizontal lines
+
+    // Vertical lines
+
+    // tickit_pen_unref(pen);
+
+    return 1;
+}
+
+fn resultWindowHandler(
     _: ?*t.TickitWindow,
     _: t.TickitEventFlags,
     _info: ?*anyopaque,
@@ -202,14 +373,21 @@ fn resizeCallback(
     });
     t.tickit_window_expose(ctx.view.?.command_window, null);
 
-    t.tickit_window_set_geometry(ctx.view.?.resultWindow, t.TickitRect{
+    const parent_rect = t.TickitRect{
         .top = 2,
         .left = 0,
         .lines = t.tickit_window_lines(rootWindow),
         .cols = t.tickit_window_cols(rootWindow),
-    });
+    };
 
+    t.tickit_window_set_geometry(ctx.view.?.resultWindow, parent_rect);
     t.tickit_window_expose(ctx.view.?.resultWindow, null);
+
+    t.tickit_window_set_geometry(
+        ctx.view.?.errorWindow,
+        normalizeWindow(parent_rect, ERROR_RATIO),
+    );
+    t.tickit_window_expose(ctx.view.?.errorWindow, null);
     return 1;
 }
 
@@ -240,20 +418,45 @@ pub fn init() View {
         0,
     ).?;
 
+    const parent_rect = t.tickit_window_get_geometry(resultWindow);
+
+    const errorWindow = t.tickit_window_new(
+        resultWindow,
+        normalizeWindow(parent_rect, ERROR_RATIO),
+        0,
+    ).?;
+
     return View{
         .tickit = tk,
         .root = root,
         .resultWindow = resultWindow,
         .command_window = top_window,
+        .errorWindow = errorWindow,
     };
 }
 
 pub fn attach_events(self: *View, app: *App) void {
+    // expose windows
     _ = t.tickit_window_bind_event(
         self.resultWindow,
         t.TICKIT_WINDOW_ON_EXPOSE,
         0,
-        childWindowExposeHandler,
+        resultWindowHandler,
+        app,
+    );
+
+    // if the error window does not have any error, hide it
+    if (app.stderr_buffer.?.len > 0) {
+        t.tickit_window_show(self.errorWindow);
+    } else {
+        t.tickit_window_hide(self.errorWindow);
+    }
+
+    _ = t.tickit_window_bind_event(
+        self.errorWindow,
+        t.TICKIT_WINDOW_ON_EXPOSE,
+        0,
+        onErrorWindowExposeHandler,
         app,
     );
 
@@ -264,6 +467,8 @@ pub fn attach_events(self: *View, app: *App) void {
         commandWindowExposeHandler,
         app,
     );
+
+    // bind event's
 
     _ = t.tickit_window_bind_event(
         self.resultWindow,

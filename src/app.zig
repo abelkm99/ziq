@@ -20,6 +20,11 @@ view: ?*View = null,
 pub fn init(alloc: std.mem.Allocator) !App {
     return App{
         .alloc = alloc,
+        .stdout_buffer = &[_]u8{},
+        .stderr_buffer = &[_]u8{},
+        .errorBuffer = &[_][]const u8{},
+        .parsedBuffer = &[_][]const u8{},
+
         .command = List(u8).init(alloc),
     };
 }
@@ -109,6 +114,9 @@ pub fn handleJQ(self: *App, command: []const u8) !void {
         self.MAX_CAP,
     );
 
+    self.alloc.free(self.stdout_buffer.?);
+    self.alloc.free(self.stderr_buffer.?);
+    // free the previous values before storing the new ones
     self.stdout_buffer = try stdout.toOwnedSlice(self.alloc);
     self.stderr_buffer = try stderr.toOwnedSlice(self.alloc);
     _ = try childProcess.wait();
@@ -135,7 +143,25 @@ pub fn processCommand(self: *App, command: []const u8) !void {
         return;
     };
 
-    self.parsedBuffer = try self.split_buffer(self.stdout_buffer.?);
+    if (self.stdout_buffer.?.len > 0) {
+        if (self.parsedBuffer) |data| {
+            for (data) |part| {
+                self.alloc.free(part);
+            }
+            self.alloc.free(data);
+        }
+        self.parsedBuffer = try self.split_buffer(self.stdout_buffer.?);
+    }
+
+    if (self.stderr_buffer.?.len > 0) {
+        std.debug.print("->\n{?s}\n<-\n", .{self.stderr_buffer});
+    }
+    if (self.errorBuffer) |data| {
+        for (data) |part| {
+            self.alloc.free(part);
+        }
+        self.alloc.free(data);
+    }
     self.errorBuffer = try self.split_buffer(self.stderr_buffer.?);
 }
 

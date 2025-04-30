@@ -1,9 +1,12 @@
 # TODO
-- [ ] take command from the user.
+- [x] take command from the user.
  - [x] support for focus from window to window.
      - [x] cursor blinking and chaning the position.
- - [ ] add window to show the erorr messages.
+ - [x] add window to show the erorr messages.
+ - [ ] Make the error window scrollable.
+ - [ ] process the result for the new command.
 - [ ] horizontal scroll.
-- [ ] add license.
-- [ ] autosuggestion.
+- [ ] autocomplete with tab.
 - [ ] enable suspending the program.
+- [ ] github ci/cd pipeline to release the project.
+- [ ] add Readme file.
