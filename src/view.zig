@@ -1,5 +1,5 @@
 const t = @cImport({
-    @cInclude("/opt/homebrew/Cellar/libtickit/0.4.5/include/tickit.h");
+    @cInclude("/usr/local/include/tickit.h");
 });
 
 pub const View = @This();
@@ -25,66 +25,26 @@ fn keyboardClickEventHandler(
     const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
         return 0;
     };
-    _ = ctx;
 
     const info: *t.TickitKeyEventInfo = if (_info != null) @ptrCast(@alignCast(_info)) else {
         return 0;
     };
 
-    std.log.info("keyboard clicked, {any} {s}", .{ info, info.str });
-    return 1;
-}
+    const input: [:0]const u8 = std.mem.span(info.str);
 
-fn mouseClickHandler(
-    _: ?*t.TickitWindow,
-    _: t.TickitEventFlags,
-    _info: ?*anyopaque,
-    _ctx: ?*anyopaque,
-) callconv(.c) c_int {
-    // std.log.info("mouse click event\n", .{});
-
-    const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
-        return 0;
-    };
-
-    const current_time = std.time.milliTimestamp();
-
-    if (current_time - ctx.view.?.last_scroll_event < THROTTLE_INTERVAL) {
-        std.log.debug("throatle\n", .{});
-        return 0;
+    if (std.mem.eql(u8, input, "Backspace")) {
+        _ = ctx.command.pop();
     }
-    ctx.view.?.last_scroll_event = current_time;
 
-    const info: *t.TickitMouseEventInfo = if (_info != null) @ptrCast(@alignCast(_info)) else {
-        return 0;
-    };
-
-    // std.log.err("mouse event -> {any}", .{info});
-
-    if (info.type == t.TICKIT_MOUSEEV_PRESS and info.button == 3) {
-        // std.log.err("mouse event -> {any}", .{info});
-        switch (info.col) {
-            (20) => {
-                std.log.err("scrolling down", .{});
-                ctx.view.?.cursor_loc += CURSOR_JUMP;
-                if (ctx.view.?.cursor_loc > ctx.parsedBuffer.?.len) {
-                    ctx.view.?.cursor_loc = @intCast(ctx.parsedBuffer.?.len); // stack at max
-                } else {
-                    t.tickit_window_expose(ctx.view.?.resultWindow, null);
-                }
-            },
-            (19) => {
-                std.log.err("scrolling up", .{});
-                ctx.view.?.cursor_loc -= CURSOR_JUMP;
-                if (ctx.view.?.cursor_loc < 0) {
-                    ctx.view.?.cursor_loc = 0;
-                } else {
-                    t.tickit_window_expose(ctx.view.?.resultWindow, null); // stack at min
-                }
-            },
-            else => {},
+    if (input.len == 1) {
+        if (std.ascii.isPrint(input[0])) {
+            _ = ctx.command.append(input[0]) catch {};
         }
     }
+    const command = ctx.command.all();
+
+    std.log.debug("command is {s}", .{command});
+    t.tickit_window_expose(ctx.view.?.command_window, null);
 
     return 1;
 }
@@ -106,17 +66,71 @@ fn commandWindowExposeHandler(
     const rb = info.rb.?;
 
     const command = std.fmt.allocPrint(ctx.alloc, "jq > {s}", .{ctx.command.all()}) catch {
-        std.log.err("error allocating command", .{});
+        // std.log.err("error allocating command", .{});
         return 0;
     };
     defer ctx.alloc.free(command);
 
-    std.log.debug("command window expose {s}", .{command});
+    // std.log.debug("command window expose {s}", .{command});
 
     t.tickit_renderbuffer_clear(rb);
     _ = t.tickit_renderbuffer_text_at(rb, 0, 0, command.ptr);
 
     t.tickit_window_set_cursor_position(win, 0, @intCast(command.len));
+
+    return 1;
+}
+
+fn mouseEventHandler(
+    _: ?*t.TickitWindow,
+    _: t.TickitEventFlags,
+    _info: ?*anyopaque,
+    _ctx: ?*anyopaque,
+) callconv(.c) c_int {
+    const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
+        return 0;
+    };
+
+    const current_time = std.time.milliTimestamp();
+
+    if (current_time - ctx.view.?.last_scroll_event < THROTTLE_INTERVAL) {
+        // std.log.debug("throatle\n", .{});
+        return 1;
+    }
+
+    _ = &_info;
+
+    ctx.view.?.last_scroll_event = current_time;
+
+    const info: *t.TickitMouseEventInfo = if (_info != null) @ptrCast(@alignCast(_info)) else {
+        return 0;
+    };
+    _ = &info;
+
+    if (info.type == t.TICKIT_MOUSEEV_WHEEL) {
+        // std.log.err("mouse event -> {any}", .{info});
+        switch (info.button) {
+            (2) => {
+                // std.log.err("scrolling down", .{});
+                ctx.view.?.cursor_loc += CURSOR_JUMP;
+                if (ctx.view.?.cursor_loc > ctx.parsedBuffer.?.len) {
+                    ctx.view.?.cursor_loc = @intCast(ctx.parsedBuffer.?.len); // stack at max
+                } else {
+                    t.tickit_window_expose(ctx.view.?.resultWindow, null);
+                }
+            },
+            (1) => {
+                // std.log.err("scrolling up", .{});
+                ctx.view.?.cursor_loc -= CURSOR_JUMP;
+                if (ctx.view.?.cursor_loc < 0) {
+                    ctx.view.?.cursor_loc = 0;
+                } else {
+                    t.tickit_window_expose(ctx.view.?.resultWindow, null); // stack at min
+                }
+            },
+            else => {},
+        }
+    }
 
     return 1;
 }
@@ -151,7 +165,17 @@ fn childWindowExposeHandler(
         if (ctx.parsedBuffer.?[i].len == 0) {
             continue;
         }
-        _ = t.tickit_renderbuffer_text_at(rb, @intCast(j), 0, ctx.parsedBuffer.?[i].ptr);
+        var cp = ctx.alloc.dupe(u8, ctx.parsedBuffer.?[i]) catch {
+            continue;
+        };
+        defer ctx.alloc.free(cp); // to resolve weird bug
+
+        _ = t.tickit_renderbuffer_text_at(
+            rb,
+            @intCast(j),
+            0,
+            cp[0..].ptr,
+        );
     }
 
     return 1;
@@ -166,7 +190,7 @@ fn resizeCallback(
     // std.log.debug("window resized", .{});
 
     const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
-        std.log.err("error getting the context", .{});
+        // std.log.err("error getting the context", .{});
         return 0;
     };
 
@@ -241,13 +265,13 @@ pub fn attach_events(self: *View, app: *App) void {
         app,
     );
 
-    // _ = t.tickit_window_bind_event(
-    //     self.root,
-    //     t.TICKIT_WINDOW_ON_MOUSE,
-    //     0,
-    //     mouseClickHandler,
-    //     app,
-    // );
+    _ = t.tickit_window_bind_event(
+        self.resultWindow,
+        t.TICKIT_WINDOW_ON_MOUSE,
+        0,
+        mouseEventHandler,
+        app,
+    );
 
     _ = t.tickit_window_bind_event(
         self.command_window,
@@ -268,7 +292,14 @@ pub fn attach_events(self: *View, app: *App) void {
 
 pub fn run(self: *View) void {
     t.tickit_window_take_focus(self.command_window);
+
     t.tickit_run(self.tickit);
+    // while (true) {
+    //     // std.debug.print("starting to sleep", .{});
+    //     std.time.sleep(50 * std.time.ns_per_ms);
+    //     // std.debug.print("waking up", .{});
+    //     t.tickit_tick(self.tickit, t.TICKIT_RUN_ONCE);
+    // }
 }
 
 pub fn deinit(self: *View) void {

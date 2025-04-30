@@ -4,10 +4,6 @@ pub const App = @This();
 
 const View = @import("view.zig").View;
 
-const t = @cImport({
-    @cInclude("/opt/homebrew/Cellar/libtickit/0.4.5/include/tickit.h");
-});
-
 alloc: std.mem.Allocator,
 
 MAX_CAP: usize = (1 << 29), // ~500MB
@@ -144,7 +140,7 @@ pub fn processCommand(self: *App, command: []const u8) !void {
 }
 
 pub fn run(self: *App) !void {
-    // const len = 5;
+    // const len = 5000;
 
     // var tmp_array = std.ArrayList([]const u8).init(self.alloc);
     // defer tmp_array.deinit();

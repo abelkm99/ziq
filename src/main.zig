@@ -6,10 +6,10 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     defer {
-        _ = gpa.deinit();
-        // if (gpa.deinit() == .leak) {
-        //     @panic("memory leak detected\n");
-        // }
+        // _ = gpa.deinit();
+        if (gpa.deinit() == .leak) {
+            @panic("memory leak detected\n");
+        }
     }
 
     var app = try App.init(allocator);

@@ -55,9 +55,9 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
-    exe.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/Cellar/libtickit/0.4.5/lib" });
+    // exe.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/Cellar/libtickit/0.4.5/lib" });
     exe.linkSystemLibrary("tickit");
-    exe.addIncludePath(.{ .cwd_relative = "/opt/homebrew/Cellar/libtickit/0.4.5/include" });
+    // exe.addIncludePath(.r .cwd_relative = "/opt/homebrew/Cellar/libtickit/0.4.5/include" });
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
