@@ -13,9 +13,12 @@
 - [ ] deploy it on homebrew and apt.
 - [ ] add Readme file.
 - [ ] use threads for the autocomplete and suggestions.
-## Bug fixes.
+
+## Immediate Bug fixes.
     - when the error window is maximized it's not using 100% of the available width.
-    - Broken Pipe BUG.
+    - Broken Pipe BUG when passing sizes more than 64kb with invalid command.
+        - had something to do the stdin descriptor being closed.
+
 ## Future Plans.
     - support unicode.
     - make the contents of the result window selectable and copyable
