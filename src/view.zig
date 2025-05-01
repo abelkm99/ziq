@@ -7,7 +7,7 @@ pub const View = @This();
 const std = @import("std");
 const App = @import("app.zig").App;
 const THROTTLE_INTERVAL = 30;
-const CURSOR_JUMP = 2;
+const CURSOR_JUMP = 3;
 const ERROR_RATIO = NormalizedStruct{
     .nx = 0.7,
     .ny = 0.3,
@@ -40,14 +40,11 @@ fn normalizeWindow(
     const parent_lines_f: f32 = @floatFromInt(parentRect.lines);
     const parent_cols_f: f32 = @floatFromInt(parentRect.cols);
 
-    // Perform calculations using floating-point numbers
     const child_top_f = parent_top_f + (parent_lines_f * normalizedRect.ny);
     const child_left_f = parent_left_f + (parent_cols_f * normalizedRect.nx);
     const child_lines_f = parent_lines_f * normalizedRect.nh;
     const child_cols_f = parent_cols_f * normalizedRect.nw;
 
-    // Convert the final float results back to c_int for the TickitRect
-    // @intFromFloat truncates (cuts off the decimal)
     return t.TickitRect{
         .top = @intFromFloat(child_top_f),
         .left = @intFromFloat(child_left_f),
@@ -118,12 +115,9 @@ fn commandWindowExposeHandler(
     const rb = info.rb.?;
 
     const command = std.fmt.allocPrint(ctx.alloc, "jq > {s}", .{ctx.command.all()}) catch {
-        // std.log.err("error allocating command", .{});
         return 0;
     };
     defer ctx.alloc.free(command);
-
-    // std.log.debug("command window expose {s}", .{command});
 
     t.tickit_renderbuffer_clear(rb);
     _ = t.tickit_renderbuffer_text_at(rb, 0, 0, command.ptr);
@@ -263,7 +257,6 @@ fn onErrorWindowExposeHandler(
             return 1;
         }
         var idx: u16 = 1;
-        std.debug.print("rendering error\n", .{});
         for (ctx.errorBuffer.?) |row| {
             // even for 1 i could go twice
             if (row.len == 0) {
@@ -271,18 +264,12 @@ fn onErrorWindowExposeHandler(
             }
 
             var j: usize = 0;
-            const cp = ctx.alloc.dupe(u8, row) catch {
-                continue;
-            };
-            defer ctx.alloc.free(cp);
-            std.debug.print("==== rendeing row\n", .{});
             while (j < row.len) {
-                std.debug.print("==== value cp[0..3] -> {s}\n", .{cp[0..2]});
                 _ = t.tickit_renderbuffer_textn_at(
                     rb,
                     @intCast(idx),
                     1,
-                    cp[j..].ptr,
+                    row[j..].ptr,
                     error_lines,
                 );
                 j += error_lines;
@@ -336,16 +323,13 @@ fn resultWindowHandler(
         if (ctx.parsedBuffer.?[i].len == 0) {
             continue;
         }
-        var cp = ctx.alloc.dupe(u8, ctx.parsedBuffer.?[i]) catch {
-            continue;
-        };
-        defer ctx.alloc.free(cp); // to resolve weird bug
 
-        _ = t.tickit_renderbuffer_text_at(
+        _ = t.tickit_renderbuffer_textn_at(
             rb,
             @intCast(j),
             0,
-            cp[0..].ptr,
+            ctx.parsedBuffer.?[i].ptr,
+            ctx.parsedBuffer.?[i].len,
         );
     }
 
