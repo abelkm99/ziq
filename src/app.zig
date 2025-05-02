@@ -166,21 +166,6 @@ pub fn processCommand(self: *App, command: []const u8) !void {
 }
 
 pub fn run(self: *App) !void {
-    // const len = 5000;
-
-    // var tmp_array = std.ArrayList([]const u8).init(self.alloc);
-    // defer tmp_array.deinit();
-
-    // for (0..len) |i| {
-    //     const row = try std.fmt.allocPrintZ(self.alloc, "{d} The quick brown fox jumped over the lazy dog", .{i});
-    //     defer self.alloc.free(row);
-
-    //     try tmp_array.append(try self.alloc.dupe(u8, row));
-    // }
-
-    // self.parsedBuffer = try tmp_array.toOwnedSlice();
-
-    // const arr = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt\nu\nv\nw\nx\ny\nz";
 
     self.input_buffer = self.get_input() catch |err| {
         std.log.err("error {any} ", .{@errorName(err)});
