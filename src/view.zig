@@ -2,6 +2,10 @@ const t = @cImport({
     @cInclude("/usr/local/include/tickit.h");
 });
 
+const c = @cImport({
+    @cInclude("signal.h");
+});
+
 pub const View = @This();
 
 const std = @import("std");
@@ -25,28 +29,12 @@ const NormalizedStruct = struct {
 cursor_loc: c_int = 0,
 tickit: *t.Tickit,
 root: *t.TickitWindow,
+term: *t.TickitTerm,
 command_window: *t.TickitWindow,
 errorWindow: *t.TickitWindow,
 resultWindow: *t.TickitWindow,
 last_scroll_event: i64 = 0,
 state: bool = true,
-
-
-fn thread_test(view: *View) void {
-    std.log.info("thread entered", .{});
-    std.time.sleep(2 * std.time.ns_per_s);
-    std.log.info("exposing window", .{});
-    t.tickit_window_show(view.errorWindow);
-    t.tickit_window_expose(view.errorWindow, null);
-    t.tickit_tick(view.tickit, t.TICKIT_RUN_NOHANG);
-    // t.tickit_watch_later(
-    //     view.tickit,
-    //     0,
-    //     thread_call_back,
-    //     null,
-    // );
-    std.log.info("thread job completed", .{});
-}
 
 fn normalizeWindow(
     parentRect: t.TickitRect,
@@ -70,6 +58,25 @@ fn normalizeWindow(
     };
 }
 
+fn handleProcessBackground(ctx: *App) void {
+    const command = ctx.command.all();
+    std.log.debug("command is {s}", .{command});
+    ctx.processCommand(command) catch {
+        std.log.err("error processing command", .{});
+    };
+
+    if (ctx.stderr_buffer.?.len > 0) {
+        std.debug.print("---> std error is {?s}", .{ctx.stderr_buffer});
+        t.tickit_window_show(ctx.view.?.errorWindow);
+        t.tickit_window_expose(ctx.view.?.errorWindow, null); // expose error window on error.
+    } else {
+        t.tickit_window_hide(ctx.view.?.errorWindow);
+        t.tickit_window_expose(ctx.view.?.resultWindow, null); // expose the result windod when there is not error.ctx
+    }
+
+    t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
+}
+
 fn keyboardClickEventHandler(
     _: ?*t.TickitWindow,
     _: t.TickitEventFlags,
@@ -86,6 +93,18 @@ fn keyboardClickEventHandler(
 
     const input: [:0]const u8 = std.mem.span(info.str);
 
+    // check for suspoend operation
+
+    if (info.mod == t.TICKIT_MOD_CTRL and std.mem.eql(u8, input, "C-z")) {
+        t.tickit_term_pause(ctx.view.?.term);
+        _ = c.raise(c.SIGSTOP);
+        t.tickit_term_resume(ctx.view.?.term);
+        t.tickit_window_expose(ctx.view.?.command_window, null);
+        t.tickit_window_expose(ctx.view.?.resultWindow, null);
+        t.tickit_window_expose(ctx.view.?.errorWindow, null);
+        return 1;
+    }
+
     if (std.mem.eql(u8, input, "Backspace")) {
         _ = ctx.command.pop();
     }
@@ -95,22 +114,11 @@ fn keyboardClickEventHandler(
             _ = ctx.command.append(input[0]) catch {};
         }
     }
-    const command = ctx.command.all();
 
-    std.log.debug("command is {s}", .{command});
-    ctx.processCommand(command) catch {
-        std.log.err("error processing command", .{});
-    };
-
-    if (ctx.stderr_buffer.?.len > 0) {
-        std.debug.print("---> std error is {?s}", .{ctx.stderr_buffer});
-        t.tickit_window_show(ctx.view.?.errorWindow);
-    } else {
-        t.tickit_window_hide(ctx.view.?.errorWindow);
-    }
-    t.tickit_window_expose(ctx.view.?.resultWindow, null);
-    t.tickit_window_expose(ctx.view.?.errorWindow, null);
     t.tickit_window_expose(ctx.view.?.command_window, null);
+    t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
+
+    _ = std.Thread.spawn(.{}, handleProcessBackground, .{ctx}) catch unreachable;
 
     return 1;
 }
@@ -235,6 +243,7 @@ fn onErrorWindowExposeHandler(
         t.tickit_renderbuffer_goto(rb, lines - 1, cols - 1);
         _ = t.tickit_renderbuffer_text(rb, "┘");
 
+        // render horizontal line
         t.tickit_renderbuffer_hline_at(
             rb,
             0,
@@ -251,7 +260,7 @@ fn onErrorWindowExposeHandler(
             t.TICKIT_LINE_SINGLE,
             0,
         );
-
+        // render vertical line
         t.tickit_renderbuffer_vline_at(
             rb,
             1,
@@ -269,11 +278,11 @@ fn onErrorWindowExposeHandler(
             0,
         );
 
-        const error_lines: usize = @intCast(t.tickit_window_lines(ctx.view.?.errorWindow));
+        const error_lines: usize = @intCast(t.tickit_window_cols(ctx.view.?.errorWindow) - 2);
         if (error_lines <= 0) {
             return 1;
         }
-        var idx: u16 = 1;
+        var idx: u16 = 2;
         for (ctx.errorBuffer.?) |row| {
             // even for 1 i could go twice
             if (row.len == 0) {
@@ -294,18 +303,8 @@ fn onErrorWindowExposeHandler(
             }
 
             idx += 2;
-
-            // break
-
         }
     }
-
-    // Draw border lines
-    // Horizontal lines
-
-    // Vertical lines
-
-    // tickit_pen_unref(pen);
 
     return 1;
 }
@@ -397,6 +396,8 @@ pub fn init() View {
 
     const root = t.tickit_get_rootwin(tk).?;
 
+    const term = t.tickit_get_term(tk).?;
+
     const top_window = t.tickit_window_new(
         root,
         t.TickitRect{
@@ -430,13 +431,15 @@ pub fn init() View {
     return View{
         .tickit = tk,
         .root = root,
+        .term = term,
         .resultWindow = resultWindow,
         .command_window = top_window,
         .errorWindow = errorWindow,
     };
 }
 
-pub fn attach_events(self: *View, app: *App) void {
+pub fn configureTUI(self: *View, app: *App) void {
+    _ = t.tickit_term_setctl_str(self.term, t.TICKIT_TERMCTL_TITLE_TEXT, "ziq");
     // expose windows
     _ = t.tickit_window_bind_event(
         self.resultWindow,
@@ -498,8 +501,6 @@ pub fn attach_events(self: *View, app: *App) void {
 
 pub fn run(self: *View) void {
     t.tickit_window_take_focus(self.command_window);
-
-    _ = std.Thread.spawn(.{}, thread_test, .{self}) catch unreachable;
 
     t.tickit_run(self.tickit);
 }
