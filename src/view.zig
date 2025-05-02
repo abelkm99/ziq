@@ -31,6 +31,23 @@ resultWindow: *t.TickitWindow,
 last_scroll_event: i64 = 0,
 state: bool = true,
 
+
+fn thread_test(view: *View) void {
+    std.log.info("thread entered", .{});
+    std.time.sleep(2 * std.time.ns_per_s);
+    std.log.info("exposing window", .{});
+    t.tickit_window_show(view.errorWindow);
+    t.tickit_window_expose(view.errorWindow, null);
+    t.tickit_tick(view.tickit, t.TICKIT_RUN_NOHANG);
+    // t.tickit_watch_later(
+    //     view.tickit,
+    //     0,
+    //     thread_call_back,
+    //     null,
+    // );
+    std.log.info("thread job completed", .{});
+}
+
 fn normalizeWindow(
     parentRect: t.TickitRect,
     normalizedRect: NormalizedStruct,
@@ -127,7 +144,7 @@ fn commandWindowExposeHandler(
     return 1;
 }
 
-fn mouseEventHandler(
+fn mouseScrollEventHandler(
     _: ?*t.TickitWindow,
     _: t.TickitEventFlags,
     _info: ?*anyopaque,
@@ -293,7 +310,7 @@ fn onErrorWindowExposeHandler(
     return 1;
 }
 
-fn resultWindowHandler(
+fn resultWindowExposeHandler(
     _: ?*t.TickitWindow,
     _: t.TickitEventFlags,
     _info: ?*anyopaque,
@@ -425,7 +442,7 @@ pub fn attach_events(self: *View, app: *App) void {
         self.resultWindow,
         t.TICKIT_WINDOW_ON_EXPOSE,
         0,
-        resultWindowHandler,
+        resultWindowExposeHandler,
         app,
     );
 
@@ -458,7 +475,7 @@ pub fn attach_events(self: *View, app: *App) void {
         self.resultWindow,
         t.TICKIT_WINDOW_ON_MOUSE,
         0,
-        mouseEventHandler,
+        mouseScrollEventHandler,
         app,
     );
 
@@ -482,13 +499,9 @@ pub fn attach_events(self: *View, app: *App) void {
 pub fn run(self: *View) void {
     t.tickit_window_take_focus(self.command_window);
 
+    _ = std.Thread.spawn(.{}, thread_test, .{self}) catch unreachable;
+
     t.tickit_run(self.tickit);
-    // while (true) {
-    //     // std.debug.print("starting to sleep", .{});
-    //     std.time.sleep(50 * std.time.ns_per_ms);
-    //     // std.debug.print("waking up", .{});
-    //     t.tickit_tick(self.tickit, t.TICKIT_RUN_ONCE);
-    // }
 }
 
 pub fn deinit(self: *View) void {
