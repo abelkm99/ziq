@@ -1,6 +1,11 @@
 const std = @import("std");
 const NodeMap = std.AutoHashMap(u8, *Node);
 
+const Suggestion = struct {
+    expires_at: i32 = -1,
+    value: []const u8,
+};
+
 const Node = struct {
     is_word: bool = false,
     // Use size 256 to accommodate all possible u8 values
@@ -58,9 +63,11 @@ const Trie = struct {
         return current.is_word;
     }
 
-    pub fn get_suggestions(alloc: std.mem.Allocator, node: *Node, current: *std.ArrayList(u8), result: *std.ArrayList([]u8)) !void {
+    pub fn get_suggestions(alloc: std.mem.Allocator, node: *Node, current: *std.ArrayList(u8), result: *std.ArrayList(Suggestion)) !void {
         if (node.is_word) {
-            try result.append(try alloc.dupe(u8, current.items));
+            try result.append(Suggestion{
+                .value = try alloc.dupe(u8, current.items),
+            });
         }
         var children_iter = node.children.keyIterator();
         while (children_iter.next()) |c| {
@@ -119,18 +126,16 @@ test "Test get all possible suggestions" {
     {
         var current = std.ArrayList(u8).init(T.alloc);
         defer current.deinit();
-        var results = std.ArrayList([]u8).init(T.alloc);
+        var results = std.ArrayList(Suggestion).init(T.alloc);
         defer {
             for (results.items) |result| {
-                T.alloc.free(result);
+                T.alloc.free(result.value);
             }
             results.deinit();
         }
-
         try Trie.get_suggestions(T.alloc, T.root, &current, &results);
-
         for (results.items, 1..) |result, i| {
-            std.debug.print("suggestion {d} -> {s}\n", .{ i, result });
+            std.debug.print("suggestion {d} -> {s}\n", .{ i, result.value });
         }
         try testing.expect(results.items.len == dictionary.len);
     }
@@ -139,16 +144,15 @@ test "Test get all possible suggestions" {
         const dot_node = T.root.children.get('.').?;
         var current = std.ArrayList(u8).init(T.alloc);
         defer current.deinit();
-        var results = std.ArrayList([]u8).init(T.alloc);
+        var results = std.ArrayList(Suggestion).init(T.alloc);
         defer {
             for (results.items) |result| {
-                T.alloc.free(result);
+                T.alloc.free(result.value);
             }
             results.deinit();
         }
         try Trie.get_suggestions(T.alloc, dot_node, &current, &results);
         try testing.expect(results.items.len == 1);
-        try testing.expect(std.mem.eql(u8, results.items[0], "name "));
+        try testing.expect(std.mem.eql(u8, results.items[0].value, "name "));
     }
-
 }

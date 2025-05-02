@@ -97,7 +97,12 @@ pub fn handleJQ(self: *App, command: []const u8) !void {
 
     errdefer _ = childProcess.kill() catch {}; // Attempt to kill if setup fails after spawn
 
-    try childProcess.stdin.?.writeAll(self.input_buffer.?);
+    if (self.input_buffer) |input_buffer| {
+        var index: usize = 0;
+        while (index < input_buffer.len) {
+            index += childProcess.stdin.?.write(input_buffer) catch break; // if it fails (BrokenPipe or anything) it breaks;
+        }
+    }
 
     childProcess.stdin.?.close();
     childProcess.stdin = null;
@@ -166,22 +171,6 @@ pub fn processCommand(self: *App, command: []const u8) !void {
 }
 
 pub fn run(self: *App) !void {
-    // const len = 5000;
-
-    // var tmp_array = std.ArrayList([]const u8).init(self.alloc);
-    // defer tmp_array.deinit();
-
-    // for (0..len) |i| {
-    //     const row = try std.fmt.allocPrintZ(self.alloc, "{d} The quick brown fox jumped over the lazy dog", .{i});
-    //     defer self.alloc.free(row);
-
-    //     try tmp_array.append(try self.alloc.dupe(u8, row));
-    // }
-
-    // self.parsedBuffer = try tmp_array.toOwnedSlice();
-
-    // const arr = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt\nu\nv\nw\nx\ny\nz";
-
     self.input_buffer = self.get_input() catch |err| {
         std.log.err("error {any} ", .{@errorName(err)});
         @panic("error reading the data");
@@ -193,7 +182,7 @@ pub fn run(self: *App) !void {
     var v = View.init();
     self.view = &v;
 
-    self.view.?.attach_events(self);
+    self.view.?.configureTUI(self);
 
     std.log.info("starting tickit window\n", .{});
     self.view.?.run();
