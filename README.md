@@ -7,7 +7,6 @@
 - [x] when the error window is maximized it's not using 100% of the available width.
 - [x] Broken Pipe BUG when passing sizes more than 64kb with invalid command.
     - had something to do the stdin descriptor being closed.
-
 ## Short Term Plans.
 - [x] add the ziq as a name for the process.
 - [x] use threads for the command event listner. (this will fix the slow jq parsing issue)

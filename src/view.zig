@@ -1,5 +1,5 @@
 const t = @cImport({
-    @cInclude("/usr/local/include/tickit.h");
+    @cInclude("/Users/code/Documents/github/libtickit-0.4.5/include/tickit.h");
 });
 
 const c = @cImport({
@@ -60,13 +60,12 @@ fn normalizeWindow(
 
 fn handleProcessBackground(ctx: *App) void {
     const command = ctx.command.all();
-    std.log.debug("command is {s}", .{command});
+    // std.log.debug("command is {s}", .{command});
     ctx.processCommand(command) catch {
-        std.log.err("error processing command", .{});
+        // std.log.err("error processing command", .{});
     };
 
     if (ctx.stderr_buffer.?.len > 0) {
-        std.debug.print("---> std error is {?s}", .{ctx.stderr_buffer});
         t.tickit_window_show(ctx.view.?.errorWindow);
         t.tickit_window_expose(ctx.view.?.errorWindow, null); // expose error window on error.
     } else {

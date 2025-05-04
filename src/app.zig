@@ -78,7 +78,7 @@ pub fn handleJQ(self: *App, command: []const u8) !void {
         command,
     };
 
-    std.log.debug("input command --> {s}", .{argv});
+    // std.log.debug("input command --> {s}", .{argv});
     var childProcess = std.process.Child.init(argv[0..], self.alloc);
 
     childProcess.stdin_behavior = .Pipe;
@@ -143,7 +143,7 @@ pub fn split_buffer(
 
 pub fn processCommand(self: *App, command: []const u8) !void {
     self.handleJQ(command) catch |err| {
-        std.log.err("{s}\n", .{@errorName(err)});
+        // std.log.err("{s}\n", .{@errorName(err)});
         self.errorBuffer = try self.split_buffer(@errorName(err));
         return;
     };
@@ -159,7 +159,7 @@ pub fn processCommand(self: *App, command: []const u8) !void {
     }
 
     if (self.stderr_buffer.?.len > 0) {
-        std.debug.print("->\n{?s}\n<-\n", .{self.stderr_buffer});
+        // std.debug.print("->\n{?s}\n<-\n", .{self.stderr_buffer});
     }
     if (self.errorBuffer) |data| {
         for (data) |part| {
@@ -184,6 +184,6 @@ pub fn run(self: *App) !void {
 
     self.view.?.configureTUI(self);
 
-    std.log.info("starting tickit window\n", .{});
+    // std.log.info("starting tickit window\n", .{});
     self.view.?.run();
 }
