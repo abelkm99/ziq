@@ -10,6 +10,7 @@ pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+
     const exe_name = b.option(
         []const u8,
         "exe_name",
