@@ -1,6 +1,7 @@
 const t = @cImport({
-    @cInclude("/Users/code/Documents/github/libtickit-0.4.5/include/tickit.h");
+    @cInclude("../../libtickit-0.4.5/include/tickit.h");
 });
+
 
 const c = @cImport({
     @cInclude("signal.h");
