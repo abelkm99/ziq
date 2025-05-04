@@ -12,57 +12,57 @@ jobs:
     runs-on: ubuntu-latest # Linux runner needed for apt-get/cpan setup easily
 
     steps:
-      # 1. Checkout main repository (this will be in GITHUB_WORKSPACE/repo-name)
+      # 1. Checkout main repository into a subdirectory 'main-repo'
       - name: Clone repository
         uses: actions/checkout@v3
+        with:
+          path: main-repo # Checkout main repo into GITHUB_WORKSPACE/main-repo
 
-      # 2. Go up one level to allow checking out dependencies alongside main repo
-      - name: Go Up One Level
-        run: cd ..
-
-      # 3. Checkout Dependencies into expected relative paths
+      # 2. Checkout Dependencies directly into GITHUB_WORKSPACE root
       - name: Clone Unibilium Repository
-        uses: actions/checkout@v3 # Match user request
+        uses: actions/checkout@v3
         with:
           repository: abelkm99/unibilium
-          path: unibilium # Clones into ../unibilium relative to main repo checkout
+          path: unibilium # Clones into GITHUB_WORKSPACE/unibilium
 
       - name: Clone Libtermkey Repository
-        uses: actions/checkout@v3 # Match user request
+        uses: actions/checkout@v3
         with:
           repository: abelkm99/libtermkey-0.23
-          path: libtermkey-0.23 # Clones into ../libtermkey-0.23 relative to main repo checkout
+          path: libtermkey-0.23 # Clones into GITHUB_WORKSPACE/libtermkey-0.23
 
       - name: Clone Libtickit Repository
-        uses: actions/checkout@v3 # Match user request
+        uses: actions/checkout@v3
         with:
           repository: abelkm99/libtickit
-          path: libtickit-0.4.5 # Clones into ../libtickit-0.4.5 relative to main repo checkout
+          path: libtickit-0.4.5 # Clones into GITHUB_WORKSPACE/libtickit-0.4.5
 
-      # 4. Install Zig
+      # Debugging: List the final workspace structure
+      - name: List workspace structure
+        run: ls -R $GITHUB_WORKSPACE
+
+      # 3. Install Zig
       - name: Install Zig
-        uses: mlugg/setup-zig@v1 # Match user request
+        uses: mlugg/setup-zig@v1
         with:
-          version: 0.14.0 # Or master, or a specific version hash
+          version: 0.14.0
 
-      # 5. Install Perl Dependencies (Needed for libtickit build)
+      # 4. Install Perl Dependencies
       - name: Install Perl and Modules
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y perl cpanminus # Install perl and cpanminus helper
-          sudo cpanm -n Convert::Color Convert::Color::XTerm # Use cpanm for non-interactive install
+          sudo apt-get install -y perl cpanminus
+          sudo cpanm -n Convert::Color Convert::Color::XTerm
 
-      # 6. Build the project for the specific target
+      # 5. Build the project from within the main repo's subdirectory
       - name: Build mac_arm
-        # Ensure we run build from the main repository's directory
-        working-directory: ${{ github.workspace }}
+        working-directory: ${{ github.workspace }}/main-repo # Run from where build.zig is
         run: "zig build -Dtarget=aarch64-macos -Doptimize=ReleaseFast -Dexe_name=ziq_mac_arm"
 
-      # # 7. Upload the artifact (Optional but recommended)
-      # - name: Upload Executable Artifact
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: ziq-mac-arm
-      #     # Path is relative to GITHUB_WORKSPACE
-      #     path: ${{ github.workspace }}/zig-out/bin/ziq_mac_arm* # Use wildcard
-      #     if-no-files-found: error # Error if the build didn't produce the file
+      # 6. Upload the artifact (Adjust path relative to GITHUB_WORKSPACE)
+      - name: Upload Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ziq-mac-arm
+          path: ${{ github.workspace }}/main-repo/zig-out/bin/ziq_mac_arm* # Path includes main-repo subdir
+          if-no-files-found: error
