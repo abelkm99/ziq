@@ -60,9 +60,21 @@ jobs:
           sudo cpanm -n Convert::Color Convert::Color::XTerm
 
       # 5. Build the project from within the main repo's subdirectory
-      - name: Build mac_arm
+      - name: Build Mac_x86 
+        working-directory: ${{ github.workspace }}/main-repo # Run from where build.zig is
+        run: "zig build -Dtarget=x86_64-macos -Doptimize=ReleaseSafe -Dexe_name=ziq_mac_x86"
+
+      - name: Build MAC_ARM
         working-directory: ${{ github.workspace }}/main-repo # Run from where build.zig is
         run: "zig build -Dtarget=aarch64-macos -Doptimize=ReleaseFast -Dexe_name=ziq_mac_arm"
+
+      - name: Build Linux_x86
+        working-directory: ${{ github.workspace }}/main-repo # Run from where build.zig is
+        run: "zig build -Dtarget=x86_64-linux -Doptimize=ReleaseSafe -Dexe_name=ziq_linux_x86"
+
+      - name: Build Linux_ARM
+        working-directory: ${{ github.workspace }}/main-repo # Run from where build.zig is
+        run: "zig build -Dtarget=aarch64-linux -Doptimize=ReleaseSafe -Dexe_name=ziq_linux_arm"
 
       - name: Release
         uses: softprops/action-gh-release@v2
@@ -70,3 +82,6 @@ jobs:
         with:
           files: |
             main-repo/zig-out/bin/ziq_mac_arm
+            main-repo/zig-out/bin/ziq_mac_x86
+            main-repo/zig-out/bin/ziq_linux_arm
+            main-repo/zig-out/bin/ziq_linux_x86
