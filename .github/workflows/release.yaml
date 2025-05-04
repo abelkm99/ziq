@@ -21,5 +21,5 @@ jobs:
         with:
           version: 0.14.0
 
-      - name: see what's inside.
-        run: ls
+      - name: Build mac_arm 
+        run: "zig build -Dtarget=aarch64-macos -Doptimize=ReleaseFast -Dexe_name=ziq_mac_arm"
