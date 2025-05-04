@@ -1,25 +1,68 @@
-name: CI
+name: CI & Release
+
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
-  release:
-    name: Release
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
+  build:
+    name: Build Project
+    runs-on: ubuntu-latest # Linux runner needed for apt-get/cpan setup easily
 
     steps:
+      # 1. Checkout main repository (this will be in GITHUB_WORKSPACE/repo-name)
       - name: Clone repository
         uses: actions/checkout@v3
 
-      - name: Install Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.14.0
+      # 2. Go up one level to allow checking out dependencies alongside main repo
+      - name: Go Up One Level
+        run: cd ..
 
-      - name: Build mac_arm 
+      # 3. Checkout Dependencies into expected relative paths
+      - name: Clone Unibilium Repository
+        uses: actions/checkout@v3 # Match user request
+        with:
+          repository: abelkm99/unibilium
+          path: unibilium # Clones into ../unibilium relative to main repo checkout
+
+      - name: Clone Libtermkey Repository
+        uses: actions/checkout@v3 # Match user request
+        with:
+          repository: abelkm99/libtermkey-0.23
+          path: libtermkey-0.23 # Clones into ../libtermkey-0.23 relative to main repo checkout
+
+      - name: Clone Libtickit Repository
+        uses: actions/checkout@v3 # Match user request
+        with:
+          repository: abelkm99/libtickit
+          path: libtickit-0.4.5 # Clones into ../libtickit-0.4.5 relative to main repo checkout
+
+      # 4. Install Zig
+      - name: Install Zig
+        uses: mlugg/setup-zig@v1 # Match user request
+        with:
+          version: 0.14.0 # Or master, or a specific version hash
+
+      # 5. Install Perl Dependencies (Needed for libtickit build)
+      - name: Install Perl and Modules
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y perl cpanminus # Install perl and cpanminus helper
+          sudo cpanm -n Convert::Color Convert::Color::XTerm # Use cpanm for non-interactive install
+
+      # 6. Build the project for the specific target
+      - name: Build mac_arm
+        # Ensure we run build from the main repository's directory
+        working-directory: ${{ github.workspace }}
         run: "zig build -Dtarget=aarch64-macos -Doptimize=ReleaseFast -Dexe_name=ziq_mac_arm"
+
+      # # 7. Upload the artifact (Optional but recommended)
+      # - name: Upload Executable Artifact
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: ziq-mac-arm
+      #     # Path is relative to GITHUB_WORKSPACE
+      #     path: ${{ github.workspace }}/zig-out/bin/ziq_mac_arm* # Use wildcard
+      #     if-no-files-found: error # Error if the build didn't produce the file
