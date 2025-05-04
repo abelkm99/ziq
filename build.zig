@@ -10,6 +10,12 @@ pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const exe_name = b.option(
+        []const u8,
+        "exe_name",
+        "Name of the executable",
+    ) orelse "ziq";
+
     // --- Configuration ---
     // !! IMPORTANT: Adjust these paths !!
     const unibilium_source_path = "../unibilium";       // Relative path example
@@ -221,7 +227,7 @@ pub fn build(b: *Builder) void {
     exe_module.addIncludePath(tickit_root_path_lazy.path(b, "include"));
 
     const exe = b.addExecutable(.{
-        .name = "ziq", // Change as needed
+        .name = exe_name,
         .root_module = exe_module,
     });
 
