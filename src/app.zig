@@ -1,5 +1,6 @@
 const std = @import("std");
 const List = @import("list.zig").List;
+const utils = @import("utils.zig");
 pub const App = @This();
 
 const View = @import("view.zig").View;
@@ -11,8 +12,8 @@ MAX_CAP: usize = (1 << 29), // ~500MB
 input_buffer: ?[]u8 = null,
 command: List(u8),
 
-stdout_buffer: ?[]const u8 = null,
-stderr_buffer: ?[]const u8 = null,
+stdout_buffer: ?[]u8 = null,
+stderr_buffer: ?[]u8 = null,
 errorBuffer: ?[][]const u8 = null,
 parsedBuffer: ?[][]const u8 = null,
 view: ?*View = null,
@@ -72,61 +73,6 @@ pub fn get_input(self: *App) ![]u8 {
     return try input_array.toOwnedSlice();
 }
 
-pub fn handleJQ(self: *App, command: []const u8) !void {
-    const argv: []const []const u8 = &[_][]const u8{
-        "jq",
-        command,
-    };
-
-    // std.log.debug("input command --> {s}", .{argv});
-    var childProcess = std.process.Child.init(argv[0..], self.alloc);
-
-    childProcess.stdin_behavior = .Pipe;
-    childProcess.stdout_behavior = .Pipe;
-    childProcess.stderr_behavior = .Pipe;
-
-    try childProcess.spawn();
-
-    errdefer {
-        _ = childProcess.kill() catch {};
-    }
-
-    defer if (childProcess.stdin != null) childProcess.stdin.?.close();
-    defer if (childProcess.stdout != null) childProcess.stdout.?.close();
-    defer if (childProcess.stderr != null) childProcess.stderr.?.close();
-
-    errdefer _ = childProcess.kill() catch {}; // Attempt to kill if setup fails after spawn
-
-    if (self.input_buffer) |input_buffer| {
-        var index: usize = 0;
-        while (index < input_buffer.len) {
-            index += childProcess.stdin.?.write(input_buffer) catch break; // if it fails (BrokenPipe or anything) it breaks;
-        }
-    }
-
-    childProcess.stdin.?.close();
-    childProcess.stdin = null;
-
-    var stdout: std.ArrayListUnmanaged(u8) = .empty;
-    errdefer stdout.deinit(self.alloc);
-    var stderr: std.ArrayListUnmanaged(u8) = .empty;
-    errdefer stderr.deinit(self.alloc);
-
-    try childProcess.collectOutput(
-        self.alloc,
-        &stdout,
-        &stderr,
-        self.MAX_CAP,
-    );
-
-    self.alloc.free(self.stdout_buffer.?);
-    self.alloc.free(self.stderr_buffer.?);
-    // free the previous values before storing the new ones
-    self.stdout_buffer = try stdout.toOwnedSlice(self.alloc);
-    self.stderr_buffer = try stderr.toOwnedSlice(self.alloc);
-    _ = try childProcess.wait();
-}
-
 pub fn split_buffer(
     self: *App,
     current: []const u8,
@@ -142,7 +88,13 @@ pub fn split_buffer(
 }
 
 pub fn processCommand(self: *App, command: []const u8) !void {
-    self.handleJQ(command) catch |err| {
+    utils.handleJQ(
+        self.alloc,
+        command,
+        self.input_buffer.?,
+        &self.stdout_buffer.?,
+        &self.stderr_buffer.?,
+    ) catch |err| {
         // std.log.err("{s}\n", .{@errorName(err)});
         self.errorBuffer = try self.split_buffer(@errorName(err));
         return;
