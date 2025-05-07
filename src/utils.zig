@@ -3,15 +3,18 @@ const std = @import("std");
 const JQResult = struct {
     std_out: []u8,
     std_err: []u8,
+
+    pub fn free(self: *JQResult, alloc: std.mem.Allocator) void {
+        alloc.free(self.std_out);
+        alloc.free(self.std_err);
+    }
 };
 
 pub fn handleJQ(
     alloc: std.mem.Allocator,
     command: []const u8,
     input_buffer: []const u8,
-    stdout_buffer: *[]u8,
-    stderr_buffer: *[]u8,
-) !void {
+) !JQResult {
     const argv: []const []const u8 = &[_][]const u8{
         "jq",
         command,
@@ -55,10 +58,13 @@ pub fn handleJQ(
         std.math.maxInt(usize),
     );
 
-    alloc.free(stdout_buffer.*);
-    alloc.free(stderr_buffer.*);
     // free the previous values before storing the new ones
-    stdout_buffer.* = try stdout.toOwnedSlice(alloc);
-    stderr_buffer.* = try stderr.toOwnedSlice(alloc);
+
+    const result = JQResult{
+        .std_out = try stdout.toOwnedSlice(alloc),
+        .std_err = try stderr.toOwnedSlice(alloc),
+    };
+
     _ = try childProcess.wait();
+    return result;
 }

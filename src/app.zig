@@ -88,19 +88,20 @@ pub fn split_buffer(
 }
 
 pub fn processCommand(self: *App, command: []const u8) !void {
-    utils.handleJQ(
+    const jq_res = utils.handleJQ(
         self.alloc,
         command,
         self.input_buffer.?,
-        &self.stdout_buffer.?,
-        &self.stderr_buffer.?,
     ) catch |err| {
         // std.log.err("{s}\n", .{@errorName(err)});
         self.errorBuffer = try self.split_buffer(@errorName(err));
         return;
     };
 
-    if (self.stdout_buffer.?.len > 0) {
+    if (jq_res.std_out.len > 0) {
+        // if we get std_out result
+        self.alloc.free(self.stdout_buffer.?);
+        self.stdout_buffer = jq_res.std_out;
         if (self.parsedBuffer) |data| {
             for (data) |part| {
                 self.alloc.free(part);
@@ -110,16 +111,20 @@ pub fn processCommand(self: *App, command: []const u8) !void {
         self.parsedBuffer = try self.split_buffer(self.stdout_buffer.?);
     }
 
-    if (self.stderr_buffer.?.len > 0) {
-        // std.debug.print("->\n{?s}\n<-\n", .{self.stderr_buffer});
-    }
+    self.alloc.free(self.stderr_buffer.?);
+    self.stderr_buffer = jq_res.std_err;
+
     if (self.errorBuffer) |data| {
         for (data) |part| {
             self.alloc.free(part);
         }
         self.alloc.free(data);
     }
-    self.errorBuffer = try self.split_buffer(self.stderr_buffer.?);
+    if (self.stderr_buffer.?.len == 0) {
+        self.errorBuffer = &[_][]const u8{};
+    } else {
+        self.errorBuffer = try self.split_buffer(self.stderr_buffer.?);
+    }
 }
 
 pub fn run(self: *App) !void {
