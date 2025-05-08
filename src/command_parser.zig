@@ -1,71 +1,107 @@
 const testing = std.testing;
 
 const utitls = @import("utils.zig");
-const Trie = @import("trie.zig").Trie;
 const Candidate = @import("trie.zig").Candidate;
 const Node = @import("trie.zig").Node;
 
 const std = @import("std");
 // some sort of majic gpt generated
-const Query =
+const OldQuery =
     \\ tostream | select(length==2) | .[0] | map(if type=="number" then "["+tostring+"]" else "."+tostring end) | join("")
 ;
 
+// TODO: make the length dynamic with `paths | select(length <= n)` so it can handle larger inputs n == 0 means disbale suggestion
+const Query =
+    \\ paths | map(if type=="number" then ".[\(. )]" elif test("^[A-Za-z_][A-Za-z0-9_]*$") then ".\(.)" else ".\(@json)" end) | join("\u001F")
+;
+
+const Command = struct {
+    is_root_node: bool = false,
+    prev_node: ?*Node, // is null if it's a new node
+    current_node: ?*Node,
+    sroot_node: *Node, //segment root node.
+
+    fn deinit(self: *Command, alloc: std.mem.Allocator) void {
+        if (self.is_root_node) {
+            self.sroot_node.deinit(alloc);
+        }
+    }
+};
+
 const JQEngine = struct {
+    /// current implementation doesn't support suggestions for json keys that has `|` inside
+    /// and are treated as pipes instead.
     const This = @This();
     alloc: std.mem.Allocator,
-    command: std.ArrayList(u8),
-    trie_node_list: std.ArrayList(?*Node),
-    trie: Trie,
-    suggestion_started: bool = false,
+    query: std.ArrayList(u8),
+    commands: std.ArrayList(Command),
+    root: *Node,
+    json_input: *[]const u8,
 
-    fn init(alloc: std.mem.Allocator) JQEngine {
+    fn init(alloc: std.mem.Allocator, json: *[]const u8) JQEngine {
         return JQEngine{
             .alloc = alloc,
-            .command = std.ArrayList(u8).init(alloc),
-            .trie_node_list = std.ArrayList(?*Node).init(alloc),
-            .trie = Trie.init(alloc) catch unreachable,
+            .query = std.ArrayList(u8).init(alloc),
+            .commands = std.ArrayList(Command).init(alloc),
+            .root = Node.new_node(alloc) catch unreachable,
+            .json_input = json,
         };
     }
 
     fn deinit(self: *This) void {
-        self.command.deinit();
-        self.trie.deinit();
-        self.trie_node_list.deinit();
+        std.debug.print("got {d} elemnts\n", .{self.commands.items.len});
+        self.query.deinit();
+        for (self.commands.items) |*command| {
+            command.deinit(self.alloc);
+        }
+        self.commands.deinit();
+        if (self.commands.items.len == 0) {
+            self.root.deinit(self.alloc); // this is a roll back function that if the the root node is deinited by the command iterator
+            // it has to be deinited manuall.
+        }
     }
 
-    /// parse cadidate buffer and populate it
-    fn parseAndPopulateCandidates(alloc: std.mem.Allocator, trie: *Trie, candidates_buffer: []const u8) !void {
-        // populate Trie
+    /// parse cadidate buffer and populate the trie into the Node
+    fn parseAndPopulateCandidates(alloc: std.mem.Allocator, node: *Node, candidates_buffer: []const u8) !void {
+
+        // remove the sepratator
+        // might move it to util's or not
+
+        const ln = std.mem.replacementSize(u8, candidates_buffer, "\\u001f", "");
+        var clean_stdout = try alloc.alloc(u8, ln);
+        defer alloc.free(clean_stdout);
+        _ = std.mem.replace(u8, candidates_buffer, "\\u001f", "", clean_stdout[0..]);
+
         var candidates = std.ArrayList([]const u8).init(alloc);
         defer candidates.deinit();
-        var it = std.mem.splitSequence(u8, candidates_buffer, "\n");
+        var it = std.mem.splitSequence(u8, clean_stdout, "\n");
         while (it.next()) |part| {
             if (part.len > 0) {
-                const start_node = if (part[1] != '.') try trie.gerOrCreateNode(".") else try trie.gerOrCreateNode("");
-                try trie.insertWithNode(start_node, part[1 .. part.len - 1]);
+                const start_node = try Node.gerOrCreateNode(alloc, node, part[1..1]);
+                try Node.insert(alloc, start_node, part[1 .. part.len - 1]);
             }
         }
     }
 
-    /// This function generate all possibel candidates and populates the Trie.
-    ///
+    /// This function generate all possibel candidates and generates a trie node
     /// generate_candidate is called once for one segment of the command
     /// one segment of command is a jq command that is separated by | character
     /// i.e jq '.user' | '.name'  this example will be two segments
-    fn generateCandidates(self: *This, input_buffer: []const u8) !void {
-        var query_buffer: [100000]u8 = undefined;
-        var new_query: []u8 = undefined;
+    fn generateCandidates(self: *This, node: *Node, idx: usize, input_buffer: []const u8) !void {
+        var new_query: []u8 = &[_]u8{};
+        defer self.alloc.free(new_query);
+
         // if the command is empty just pass the Query as JQ result.
-        if (self.command.items.len == 0) {
-            new_query = try std.fmt.bufPrint(&query_buffer, "{s}{s}", .{ self.get_command(), Query });
+        if (self.query.items.len == 0) {
+            new_query = try std.fmt.allocPrint(self.alloc, "{s}", .{Query});
         } else {
-            new_query = try std.fmt.bufPrint(&query_buffer, "{s} | {s}", .{ self.get_command(), Query });
+            new_query = try std.fmt.allocPrint(self.alloc, "{s} | {s}", .{ self.query.items[0..idx], Query });
         }
         var jq_res = try utitls.handleJQ(self.alloc, new_query, input_buffer);
         defer jq_res.free(self.alloc);
-        if (jq_res.std_out.len >= 0) {
-            try parseAndPopulateCandidates(self.alloc, &self.trie, jq_res.std_out);
+
+        if (jq_res.status) {
+            try parseAndPopulateCandidates(self.alloc, node, jq_res.std_out);
         }
 
         var current = std.ArrayList(u8).init(self.alloc);
@@ -75,11 +111,11 @@ const JQEngine = struct {
     }
 
     fn get_candidate_idx(self: *This, idx: usize, n: usize) ![]Candidate {
-        if (self.trie_node_list.items.len > idx) {
-            if (self.trie_node_list.items[idx]) |node| {
+        if (idx < self.commands.items.len) {
+            if (self.commands.items[idx].current_node) |node| {
                 var result = std.ArrayList(Candidate).init(self.alloc);
                 defer result.deinit();
-                try self.trie.getCandidatesBFS(node, &result, n);
+                try Node.getCandidatesBFS(self.alloc, node, &result, n);
 
                 return try result.toOwnedSlice();
             }
@@ -88,43 +124,72 @@ const JQEngine = struct {
     }
 
     fn add(self: *This, ch: u8) !void {
-        try self.insert(ch, self.command.items.len);
+        // push it to the last item
+        try self.insert(ch, self.query.items.len);
     }
 
-    fn insert(self: *This, ch: u8, idx: ?usize) !void {
-        std.debug.print("adding {c}\n", .{ch});
-        try self.command.append(ch);
-        // if giving suggestion is not started start a new one which is the root node is appended
-        // this code need a little some refactoring
-        if (!self.suggestion_started and ch == '.') {
-            self.suggestion_started = true;
-            try self.trie_node_list.append(self.trie.root.children.get(ch).?);
-        } else if (self.suggestion_started) {
-            const last_idx = idx.? - 1;
-            if (self.trie_node_list.items.len == 0 or self.trie_node_list.items[last_idx] == null) {
-                try self.trie_node_list.append(null);
+    fn insert(self: *This, ch: u8, idx: usize) !void {
+        var command: Command = undefined;
+        if (idx == 0) {
+            command = .{
+                // regardless
+                .is_root_node = true,
+                .prev_node = null,
+                .current_node = self.root.children.get(ch),
+                .sroot_node = self.root,
+            };
+        } else {
+            // if it's a pipe means i need to do calculations
+            if (ch == '|') {
+                const new_node = try Node.new_node(self.alloc);
+                try self.generateCandidates(new_node, idx - 1, self.json_input.*);
+                command = Command{
+                    .is_root_node = true,
+                    .prev_node = null,
+                    .current_node = new_node,
+                    .sroot_node = new_node,
+                };
             } else {
-                const last_node = self.trie_node_list.items[last_idx]; // last node can be null
-                if (last_node) |node| {
-                    try self.trie_node_list.append(node.children.get(ch));
+                // if ch == "." -> and prev_node is null start giving suggestion.
+                const s_root_node = self.commands.items[idx - 1].sroot_node;
+                if (ch == '.' and self.commands.items[idx - 1].current_node == null) {
+                    // start from the current segment root node
+                    //
+                    command = Command{
+                        .is_root_node = true,
+                        .prev_node = null,
+                        .current_node = s_root_node.children.get(ch),
+                        .sroot_node = s_root_node,
+                    };
+                } else {
+                    const prev_node = self.commands.items[idx - 1].current_node;
+                    const current_node = if (prev_node == null) null else prev_node.?.children.get(ch);
+                    command = Command{
+                        .is_root_node = false,
+                        .prev_node = prev_node,
+                        .current_node = current_node,
+                        .sroot_node = s_root_node,
+                    };
                 }
-
             }
         }
 
-        if (idx) |i| {
-            if (i >= self.command.items.len) {
-                return error.OutOfBounds;
-            }
-            @memcpy(self.command.items[i + 1 ..], self.command.items[i .. self.command.items.len - 1]);
-            self.command.items[i] = ch;
-            return;
-        }
-        try self.trie_node_list.append(try self.trie.gerOrCreateNode(self.command.items));
+        try self.commands.insert(idx, command);
+        try self.query.insert(idx, ch);
+
+        self.recalc(idx);
     }
 
     fn get_command(self: *This) []u8 {
-        return self.command.items;
+        return self.query.items;
+    }
+
+    fn recalc(self: *This, idx: usize) void {
+        for (idx..self.query.items.len) |i| {
+            if (i == 0) {
+                // self.commands.items[]
+            }
+        }
     }
 };
 
@@ -155,7 +220,7 @@ test "test command parser" {
         //     std.debug.print("Error: {s}\n", .{@errorName(err)});
         //     return;
         // };
-        const json =
+        var json: []const u8 =
             \\{
             \\    "name": "John",
             \\    "age": 30,
@@ -184,16 +249,14 @@ test "test command parser" {
         }
         // for suggestion use the previous data and give them sometihgn
 
-        var engine = JQEngine.init(alloc);
+        var engine = JQEngine.init(alloc, &json);
         defer engine.deinit();
-        try engine.generateCandidates(json);
+        try engine.generateCandidates(engine.root, 0, engine.json_input.*);
 
         // Command: "."
         try engine.add('.');
         {
-            // User log showed 5 candidates even though `count` was 4.
-            // We will assert against the 5 logged candidates.
-            const candidates_after_dot = try engine.get_candidate_idx(0, 4);
+            const candidates_after_dot = try engine.get_candidate_idx(0, 5);
             defer free_candidates(engine.alloc, candidates_after_dot);
 
             // std.debug.print("\nCandidates after '.': (command: '{s}', idx: 0)\n", .{engine.get_command()});
@@ -204,8 +267,9 @@ test "test command parser" {
             const expected_after_dot = [_][]const u8{
                 "age",
                 "name",
+                "cars",
                 "city",
-                "cars[1].mpg",
+                "cars.[1]",
             };
             try checkCandidates(alloc, candidates_after_dot, &expected_after_dot);
         }
@@ -214,7 +278,7 @@ test "test command parser" {
         // Command: ".c"
         try engine.add('c');
         {
-            const candidates_after_c = try engine.get_candidate_idx(1, 4); // idx=1 refers to 'c'
+            const candidates_after_c = try engine.get_candidate_idx(1, 5); // idx=1 refers to 'c'
             defer free_candidates(engine.alloc, candidates_after_c);
 
             // std.debug.print("\nCandidates after '.c': (command: '{s}', idx: 1)\n", .{engine.get_command()});
@@ -223,10 +287,11 @@ test "test command parser" {
             // }
 
             const expected_after_c = [_][]const u8{
+                "ars",
                 "ity",
-                "ars[1].mpg",
-                "ars[0].mpg",
-                "ars[1].model",
+                "ars.[1]",
+                "ars.[0]",
+                "ars.[1].mpg",
             };
             try checkCandidates(alloc, candidates_after_c, &expected_after_c);
         }
@@ -235,7 +300,7 @@ test "test command parser" {
         // Command: ".cb"
         try engine.add('b');
         {
-            const candidates_after_b = try engine.get_candidate_idx(engine.command.items.len, 4);
+            const candidates_after_b = try engine.get_candidate_idx(engine.query.items.len, 4);
             defer free_candidates(engine.alloc, candidates_after_b);
 
             // std.debug.print("\nCandidates after '.cb': (command: '{s}', idx: {d})\n", .{ engine.get_command(), engine.command.items.len });
@@ -246,5 +311,11 @@ test "test command parser" {
             const expected_after_b = [_][]const u8{}; // No paths start with ".cb"
             try checkCandidates(alloc, candidates_after_b, &expected_after_b);
         }
+
+        // pop cases 
+        //
+        //
+        //
+        // insert in the middle cases and many others
     }
 }

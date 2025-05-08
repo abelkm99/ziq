@@ -3,6 +3,7 @@ const std = @import("std");
 const JQResult = struct {
     std_out: []u8,
     std_err: []u8,
+    status: bool = true,
 
     pub fn free(self: *JQResult, alloc: std.mem.Allocator) void {
         alloc.free(self.std_out);
@@ -25,6 +26,7 @@ pub fn handleJQ(
     childProcess.stdin_behavior = .Pipe;
     childProcess.stdout_behavior = .Pipe;
     childProcess.stderr_behavior = .Pipe;
+    var successfully_completed: bool = true;
 
     try childProcess.spawn();
 
@@ -40,7 +42,10 @@ pub fn handleJQ(
 
     var index: usize = 0;
     while (index < input_buffer.len) {
-        index += childProcess.stdin.?.write(input_buffer) catch break; // if it fails (BrokenPipe or anything) it breaks;
+        index += childProcess.stdin.?.write(input_buffer) catch {
+            successfully_completed = false;
+            break; // if it fails (BrokenPipe or anything) it breaks;
+        };
     }
 
     childProcess.stdin.?.close();
@@ -60,9 +65,14 @@ pub fn handleJQ(
 
     // free the previous values before storing the new ones
 
+    // if there is anything on the standard error means an error has occured
+    if (stderr.items.len > 0) {
+        successfully_completed = false;
+    }
     const result = JQResult{
         .std_out = try stdout.toOwnedSlice(alloc),
         .std_err = try stderr.toOwnedSlice(alloc),
+        .status = successfully_completed,
     };
 
     _ = try childProcess.wait();
