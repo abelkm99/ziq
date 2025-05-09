@@ -15,6 +15,11 @@ const Query =
     \\ paths | map(if type=="number" then ".[\(. )]" elif test("^[A-Za-z_][A-Za-z0-9_]*$") then ".\(.)" else ".\(@json)" end) | join("\u001F")
 ;
 
+const SuggestError = error{
+    InvalidIndex,
+    InvalidCommand,
+};
+
 const Command = struct {
     is_root_node: bool = false,
     prev_node: ?*Node, // is null if it's a new node
@@ -128,66 +133,71 @@ const JQEngine = struct {
         try self.insert(ch, self.query.items.len);
     }
 
-    fn insert(self: *This, ch: u8, idx: usize) !void {
-        var command: Command = undefined;
+    fn updateCandidatesForIdx(self: *This, idx: usize) !Command {
+        if (idx >= self.query.items.len) {
+            return error.InvalidIndex;
+        }
+        const ch = self.query.items[idx];
+
         if (idx == 0) {
-            command = .{
+            return .{
                 // regardless
                 .is_root_node = true,
                 .prev_node = null,
                 .current_node = self.root.children.get(ch),
                 .sroot_node = self.root,
             };
-        } else {
-            // if it's a pipe means i need to do calculations
-            if (ch == '|') {
-                const new_node = try Node.new_node(self.alloc);
-                try self.generateCandidates(new_node, idx - 1, self.json_input.*);
-                command = Command{
-                    .is_root_node = true,
-                    .prev_node = null,
-                    .current_node = new_node,
-                    .sroot_node = new_node,
-                };
-            } else {
-                // if ch == "." -> and prev_node is null start giving suggestion.
-                const s_root_node = self.commands.items[idx - 1].sroot_node;
-                if (ch == '.' and self.commands.items[idx - 1].current_node == null) {
-                    // start from the current segment root node
-                    //
-                    command = Command{
-                        .is_root_node = true,
-                        .prev_node = null,
-                        .current_node = s_root_node.children.get(ch),
-                        .sroot_node = s_root_node,
-                    };
-                } else {
-                    const prev_node = self.commands.items[idx - 1].current_node;
-                    const current_node = if (prev_node == null) null else prev_node.?.children.get(ch);
-                    command = Command{
-                        .is_root_node = false,
-                        .prev_node = prev_node,
-                        .current_node = current_node,
-                        .sroot_node = s_root_node,
-                    };
-                }
-            }
+        }
+        // if it's a pipe means i need to do calculations
+        if (ch == '|') {
+            const new_node = try Node.new_node(self.alloc);
+            try self.generateCandidates(new_node, idx - 1, self.json_input.*);
+            return .{
+                .is_root_node = true,
+                .prev_node = null,
+                .current_node = new_node,
+                .sroot_node = new_node,
+            };
+        }
+        // if ch == "." -> and prev_node is null start giving suggestion.
+        const s_root_node = self.commands.items[idx - 1].sroot_node;
+        if (ch == '.' and self.commands.items[idx - 1].current_node == null) {
+            // start from the current segment root node
+            return .{
+                .is_root_node = true,
+                .prev_node = null,
+                .current_node = s_root_node.children.get(ch),
+                .sroot_node = s_root_node,
+            };
         }
 
-        try self.commands.insert(idx, command);
-        try self.query.insert(idx, ch);
+        const prev_node = self.commands.items[idx - 1].current_node;
+        const current_node = if (prev_node == null) null else prev_node.?.children.get(ch);
+        return .{
+            .is_root_node = false,
+            .prev_node = prev_node,
+            .current_node = current_node,
+            .sroot_node = s_root_node,
+        };
+    }
 
-        self.recalc(idx);
+    fn insert(self: *This, ch: u8, idx: usize) !void {
+        // increase the capacity regardless
+        try self.query.insert(idx, ch);
+        try self.recalc(idx);
     }
 
     fn get_command(self: *This) []u8 {
         return self.query.items;
     }
 
-    fn recalc(self: *This, idx: usize) void {
+    fn recalc(self: *This, idx: usize) !void {
         for (idx..self.query.items.len) |i| {
-            if (i == 0) {
-                // self.commands.items[]
+            const command = try self.updateCandidatesForIdx(i);
+            if (i < self.commands.items.len) {
+                self.commands.items[i] = command;
+            } else {
+                try self.commands.append(command);
             }
         }
     }
@@ -312,7 +322,7 @@ test "test command parser" {
             try checkCandidates(alloc, candidates_after_b, &expected_after_b);
         }
 
-        // pop cases 
+        // pop cases
         //
         //
         //
