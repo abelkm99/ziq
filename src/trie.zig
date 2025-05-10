@@ -83,9 +83,11 @@ pub const Node = struct {
             return;
         }
         if (node.is_word) {
-            try result.append(Candidate{
-                .value = try alloc.dupe(u8, current.items),
-            });
+            if (current.items.len > 0) {
+                try result.append(Candidate{
+                    .value = try alloc.dupe(u8, current.items),
+                });
+            }
         }
         var children_iter = node.children.keyIterator();
         while (children_iter.next()) |c| {
@@ -123,7 +125,11 @@ pub const Node = struct {
             defer current.value.deinit();
 
             if (current.node.is_word) {
-                try result.append(.{ .value = try alloc.dupe(u8, current.value.items) });
+                if (current.value.items.len > 0) {
+                    try result.append(.{
+                        .value = try alloc.dupe(u8, current.value.items),
+                    });
+                }
             }
 
             var children_iter = current.node.children.keyIterator();
@@ -262,7 +268,7 @@ test "Test insert with Node" {
             candidates.deinit();
         }
         try Node.getCandidates(allocator, try Node.gerOrCreateNode(allocator, root_node, ".n"), &current, &candidates, std.math.maxInt(usize));
-        try testing.expect(candidates.items.len == 2);
+        try testing.expect(candidates.items.len == 1);
     }
 }
 
