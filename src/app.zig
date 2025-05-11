@@ -142,6 +142,13 @@ pub fn run(self: *App) !void {
     try self.engine.generateCandidates(self.engine.root, 0, self.engine.json_input.*);
     try self.engine.add('.');
     try self.engine.recalc(0, self.input_buffer);
+    self.suggestions = self.engine.get_candidate_idx(0, 10) catch unreachable;
+
+    std.debug.print("inside App.run initial print, {d}\n", .{self.suggestions.len});
+    for(self.suggestions) |suggestion| {
+        std.debug.print("{s}\n", .{suggestion.value});
+    }
+
     try self.processCommand(self.engine.get_command());
 
     var v = View.init();
