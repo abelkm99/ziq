@@ -33,7 +33,7 @@ const Command = struct {
     }
 };
 
-const JQEngine = struct {
+pub const JQEngine = struct {
     /// current implementation doesn't support suggestions for json keys that has `|` inside
     /// and are treated as pipes instead.
     const This = @This();
@@ -43,7 +43,7 @@ const JQEngine = struct {
     root: *Node,
     json_input: *[]const u8,
 
-    fn init(alloc: std.mem.Allocator, json: *[]const u8) JQEngine {
+    pub fn init(alloc: std.mem.Allocator, json: *[]const u8) JQEngine {
         return JQEngine{
             .alloc = alloc,
             .query = std.ArrayList(u8).init(alloc),
@@ -53,7 +53,7 @@ const JQEngine = struct {
         };
     }
 
-    fn deinit(self: *This) void {
+    pub fn deinit(self: *This) void {
         self.query.deinit();
         for (self.commands.items) |*command| {
             command.deinit(self.alloc);
@@ -66,7 +66,7 @@ const JQEngine = struct {
     }
 
     /// parse cadidate buffer and populate the trie into the Node
-    fn parseAndPopulateCandidates(alloc: std.mem.Allocator, node: *Node, candidates_buffer: []const u8) !void {
+    pub fn parseAndPopulateCandidates(alloc: std.mem.Allocator, node: *Node, candidates_buffer: []const u8) !void {
 
         // remove the sepratator
         // might move it to util's or not
@@ -91,7 +91,7 @@ const JQEngine = struct {
     /// generate_candidate is called once for one segment of the command
     /// one segment of command is a jq command that is separated by | character
     /// i.e jq '.user' | '.name'  this example will be two segments
-    fn generateCandidates(self: *This, node: *Node, idx: usize, input_buffer: []const u8) !void {
+    pub fn generateCandidates(self: *This, node: *Node, idx: usize, input_buffer: []const u8) !void {
         var new_query: []u8 = &[_]u8{};
         defer self.alloc.free(new_query);
 
@@ -101,6 +101,7 @@ const JQEngine = struct {
         } else {
             new_query = try std.fmt.allocPrint(self.alloc, "{s} | {s}", .{ self.query.items[0..idx], Query });
         }
+
         var jq_res = try utitls.handleJQ(self.alloc, new_query, input_buffer);
         defer jq_res.free(self.alloc);
 
@@ -114,7 +115,7 @@ const JQEngine = struct {
         defer result.deinit();
     }
 
-    fn get_candidate_idx(self: *This, idx: usize, n: usize) ![]Candidate {
+    pub fn get_candidate_idx(self: *This, idx: usize, n: usize) ![]Candidate {
         if (idx < self.commands.items.len) {
             if (self.commands.items[idx].current_node) |node| {
                 var result = std.ArrayList(Candidate).init(self.alloc);
@@ -127,12 +128,12 @@ const JQEngine = struct {
         return &[_]Candidate{};
     }
 
-    fn add(self: *This, ch: u8) !void {
+    pub fn add(self: *This, ch: u8) !void {
         // push it to the last item
         try self.insert(ch, self.query.items.len);
     }
 
-    fn updateCandidatesForIdx(self: *This, idx: usize) !Command {
+    pub fn updateCandidatesForIdx(self: *This, idx: usize, input_buffer: []const u8) !Command {
         if (idx >= self.query.items.len) {
             return error.InvalidIndex;
         }
@@ -150,7 +151,7 @@ const JQEngine = struct {
         // if it's a pipe means i need to do calculations
         if (ch == '|') {
             const new_node = try Node.new_node(self.alloc);
-            try self.generateCandidates(new_node, idx - 1, self.json_input.*);
+            try self.generateCandidates(new_node, idx - 1, input_buffer);
             return .{
                 .is_root_node = true,
                 .prev_node = null,
@@ -180,19 +181,18 @@ const JQEngine = struct {
         };
     }
 
-    fn insert(self: *This, ch: u8, idx: usize) !void {
+    pub fn insert(self: *This, ch: u8, idx: usize) !void {
         try self.query.insert(idx, ch);
-        try self.recalc(idx);
     }
 
-    fn get_command(self: *This) []u8 {
+    pub fn get_command(self: *This) []u8 {
         return self.query.items;
     }
 
-    fn pop_back(self: *This) !void {
+    pub fn pop_back(self: *This) !void {
         try self.pop_idx(self.query.items.len - 1);
     }
-    fn pop_idx(self: *This, idx: usize) !void {
+    pub fn pop_idx(self: *This, idx: usize) !void {
         if (idx >= self.query.items.len) {
             // ignore pop if list already empty
             return;
@@ -208,12 +208,11 @@ const JQEngine = struct {
 
         _ = self.query.pop();
         _ = self.commands.pop();
-        try self.recalc(idx);
     }
 
-    fn recalc(self: *This, idx: usize) !void {
+    pub fn recalc(self: *This, idx: usize, input_buffer: []const u8) !void {
         for (idx..self.query.items.len) |i| {
-            const command = try self.updateCandidatesForIdx(i);
+            const command = try self.updateCandidatesForIdx(i, input_buffer);
             if (i < self.commands.items.len) {
                 // if it's root node
                 if (self.commands.items[i].is_root_node and i != 0) {
@@ -228,7 +227,7 @@ const JQEngine = struct {
     }
 };
 
-fn free_candidates(alloc: std.mem.Allocator, candidates: []Candidate) void {
+pub fn free_candidates(alloc: std.mem.Allocator, candidates: []Candidate) void {
     for (candidates) |candidate| {
         alloc.free(candidate.value);
     }
@@ -285,6 +284,7 @@ test "test command parser" {
         try engine.generateCandidates(engine.root, 0, engine.json_input.*);
 
         try engine.add('.');
+        try engine.recalc(0, json);
         {
             const candidates_after_dot = try engine.get_candidate_idx(0, 5);
             defer free_candidates(engine.alloc, candidates_after_dot);
@@ -300,6 +300,7 @@ test "test command parser" {
         }
 
         try engine.add('c');
+        try engine.recalc(1, json);
         {
             const candidates_after_c = try engine.get_candidate_idx(1, 5); // idx=1 refers to 'c'
             defer free_candidates(engine.alloc, candidates_after_c);
@@ -317,6 +318,7 @@ test "test command parser" {
         for ("ars | .") |ch| {
             try engine.add(ch);
         }
+        try engine.recalc(1, json);
 
         {
             const candidates_after_second_dot = try engine.get_candidate_idx(engine.query.items.len - 1, 4);
@@ -371,6 +373,7 @@ test "insert a node in the middle" {
         for (input) |ch| {
             try engine.add(ch);
         }
+        try engine.recalc(0, json);
         var candidates = try engine.get_candidate_idx(input.len - 1, 5);
         _ = &candidates;
         defer free_candidates(alloc, candidates);
@@ -379,6 +382,7 @@ test "insert a node in the middle" {
         // now insert at position 24 (after . the value of c)
         try engine.insert('c', 24);
 
+        try engine.recalc(24, json);
         free_candidates(alloc, candidates); // free the previous ones
 
         candidates = try engine.get_candidate_idx(engine.query.items.len - 1, 5);
@@ -395,6 +399,7 @@ test "insert a node in the middle" {
             try engine.insert(ch, 0);
         }
         free_candidates(alloc, candidates); // free the previous ones
+        try engine.recalc(0, json);
         candidates = try engine.get_candidate_idx(engine.query.items.len - 1, 5);
         try checkCandidates(alloc, candidates, &expected_candidates);
     }
@@ -407,7 +412,7 @@ test "insert a node in the middle" {
             try engine.add(ch);
         }
         try engine.insert('.', 0);
-        // try engine.insert('.', 0);
+        try engine.recalc(0, json);
         var candidates = try engine.get_candidate_idx(engine.query.items.len - 1, 5);
         _ = &candidates;
         var expected_candidates = [_][]const u8{
@@ -457,8 +462,9 @@ test "pop item from the end" {
         defer engine.deinit();
         try engine.generateCandidates(engine.root, 0, engine.json_input.*);
         const input = ".cbe";
-        for (input) |ch| {
+        for (input, 0..) |ch, i| {
             try engine.add(ch);
+            try engine.recalc(i, json);
         }
 
         var candidates = try engine.get_candidate_idx(input.len - 1, 5);
@@ -466,7 +472,9 @@ test "pop item from the end" {
         defer free_candidates(alloc, candidates);
 
         try engine.pop_back();
+        try engine.recalc(engine.get_command().len - 1, json);
         try engine.pop_back();
+        try engine.recalc(engine.get_command().len - 1, json);
 
         // pop and check
 
@@ -488,8 +496,9 @@ test "pop item from the end" {
         defer engine.deinit();
         try engine.generateCandidates(engine.root, 0, engine.json_input.*);
         const input = "dars";
-        for (input) |ch| {
+        for (input, 0..) |ch, i| {
             try engine.add(ch);
+            try engine.recalc(i, json);
         }
 
         var candidates = try engine.get_candidate_idx(engine.get_command().len, 5);
@@ -499,7 +508,9 @@ test "pop item from the end" {
 
         try engine.pop_idx(0);
         try engine.insert('c', 0);
+        try engine.recalc(0, json);
         try engine.insert('.', 0);
+        try engine.recalc(0, json);
 
         free_candidates(alloc, candidates);
         candidates = try engine.get_candidate_idx(engine.get_command().len - 1, 5);
@@ -519,13 +530,17 @@ test "pop item from the end" {
         defer engine.deinit();
         try engine.generateCandidates(engine.root, 0, engine.json_input.*);
         const input = ".cars | .[0]";
-        for (input) |ch| {
+        for (input, 0..) |ch, i| {
             try engine.add(ch);
+            try engine.recalc(i, json);
         }
 
         try engine.pop_idx(5);
+        try engine.recalc(5, json);
         try engine.pop_idx(5);
+        try engine.recalc(5, json);
         try engine.pop_idx(5);
+        try engine.recalc(5, json);
 
         var candidates = try engine.get_candidate_idx(engine.get_command().len - 1, 100);
         _ = &candidates;
@@ -541,9 +556,13 @@ test "pop item from the end" {
         // pop everything
         for (0..engine.get_command().len) |_| {
             try engine.pop_back();
+            if (engine.get_command().len > 0) {
+                try engine.recalc(engine.get_command().len - 1, json);
+            }
         }
         for (".nam") |ch| {
             try engine.add(ch);
+            try engine.recalc(engine.get_command().len - 1, json);
         }
         free_candidates(alloc, candidates);
         candidates = try engine.get_candidate_idx(engine.get_command().len - 1, 100);

@@ -2,7 +2,6 @@ const t = @cImport({
     @cInclude("../../libtickit-0.4.5/include/tickit.h");
 });
 
-
 const c = @cImport({
     @cInclude("signal.h");
 });
@@ -60,7 +59,7 @@ fn normalizeWindow(
 }
 
 fn handleProcessBackground(ctx: *App) void {
-    const command = ctx.command.all();
+    const command = ctx.engine.get_command();
     // std.log.debug("command is {s}", .{command});
     ctx.processCommand(command) catch {
         // std.log.err("error processing command", .{});
@@ -77,79 +76,31 @@ fn handleProcessBackground(ctx: *App) void {
     t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
 }
 
-fn keyboardClickEventHandler(
-    _: ?*t.TickitWindow,
-    _: t.TickitEventFlags,
-    _info: ?*anyopaque,
-    _ctx: ?*anyopaque,
-) callconv(.c) c_int {
-    const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
-        return 0;
-    };
-
-    const info: *t.TickitKeyEventInfo = if (_info != null) @ptrCast(@alignCast(_info)) else {
-        return 0;
-    };
-
-    const input: [:0]const u8 = std.mem.span(info.str);
-
-    // check for suspoend operation
-
-    if (info.mod == t.TICKIT_MOD_CTRL and std.mem.eql(u8, input, "C-z")) {
-        t.tickit_term_pause(ctx.view.?.term);
-        _ = c.raise(c.SIGSTOP);
-        t.tickit_term_resume(ctx.view.?.term);
-        t.tickit_window_expose(ctx.view.?.command_window, null);
-        t.tickit_window_expose(ctx.view.?.resultWindow, null);
-        t.tickit_window_expose(ctx.view.?.errorWindow, null);
-        return 1;
+fn getSuggestionBackground(app: *App) void {
+    app.lock.lock();
+    defer app.lock.unlock();
+    const command = app.engine.get_command();
+    const ln: usize = command.len;
+    if (ln > 0) {
+        app.engine.recalc(ln - 1, app.input_buffer) catch unreachable;
     }
 
-    if (std.mem.eql(u8, input, "Backspace")) {
-        _ = ctx.command.pop();
+    // free the previous suggestions
+    for (app.suggestions) |suggestion| {
+        app.alloc.free(suggestion.value);
+    }
+    app.alloc.free(app.suggestions);
+
+    // get a new set of suggestions
+
+    if (command.len  >= 1) {
+        app.suggestions = app.engine.get_candidate_idx(command.len - 1, 10) catch unreachable;
     }
 
-    if (input.len == 1) {
-        if (std.ascii.isPrint(input[0])) {
-            _ = ctx.command.append(input[0]) catch {};
-        }
+
+    for (app.suggestions) |suggestion| {
+        std.debug.print("{s}\n", .{suggestion.value});
     }
-
-    t.tickit_window_expose(ctx.view.?.command_window, null);
-    t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
-
-    _ = std.Thread.spawn(.{}, handleProcessBackground, .{ctx}) catch unreachable;
-
-    return 1;
-}
-
-fn commandWindowExposeHandler(
-    win: ?*t.TickitWindow,
-    _: t.TickitEventFlags,
-    _info: ?*anyopaque,
-    _ctx: ?*anyopaque,
-) callconv(.c) c_int {
-    const info: *t.TickitExposeEventInfo = if (_info != null) @ptrCast(@alignCast(_info)) else {
-        return 0;
-    };
-
-    const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
-        return 0;
-    };
-
-    const rb = info.rb.?;
-
-    const command = std.fmt.allocPrint(ctx.alloc, "jq > {s}", .{ctx.command.all()}) catch {
-        return 0;
-    };
-    defer ctx.alloc.free(command);
-
-    t.tickit_renderbuffer_clear(rb);
-    _ = t.tickit_renderbuffer_text_at(rb, 0, 0, command.ptr);
-
-    t.tickit_window_set_cursor_position(win, 0, @intCast(command.len));
-
-    return 1;
 }
 
 fn mouseScrollEventHandler(
@@ -202,6 +153,87 @@ fn mouseScrollEventHandler(
             else => {},
         }
     }
+
+    return 1;
+}
+
+fn keyboardClickEventHandler(
+    _: ?*t.TickitWindow,
+    _: t.TickitEventFlags,
+    _info: ?*anyopaque,
+    _ctx: ?*anyopaque,
+) callconv(.c) c_int {
+    const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
+        return 0;
+    };
+
+    const info: *t.TickitKeyEventInfo = if (_info != null) @ptrCast(@alignCast(_info)) else {
+        return 0;
+    };
+
+    const input: [:0]const u8 = std.mem.span(info.str);
+
+    // check for suspoend operation
+
+    if (info.mod == t.TICKIT_MOD_CTRL and std.mem.eql(u8, input, "C-z")) {
+        t.tickit_term_pause(ctx.view.?.term);
+        _ = c.raise(c.SIGSTOP);
+        t.tickit_term_resume(ctx.view.?.term);
+        t.tickit_window_expose(ctx.view.?.command_window, null);
+        t.tickit_window_expose(ctx.view.?.resultWindow, null);
+        t.tickit_window_expose(ctx.view.?.errorWindow, null);
+        return 1;
+    }
+
+    // this shuld have been done in the background
+
+    if (std.mem.eql(u8, input, "Backspace")) {
+        _ = ctx.engine.pop_back() catch unreachable;
+        // FIXME: this is a heavy operation and the recalc should have been done on the background.
+    }
+
+    if (input.len == 1) {
+        if (std.ascii.isPrint(input[0])) {
+            _ = ctx.engine.add(input[0]) catch {};
+        }
+    }
+
+    t.tickit_window_expose(ctx.view.?.command_window, null);
+    t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
+
+    // getSuggestionBackground(ctx);
+
+    _ = std.Thread.spawn(.{}, getSuggestionBackground, .{ctx}) catch unreachable;
+    _ = std.Thread.spawn(.{}, handleProcessBackground, .{ctx}) catch unreachable;
+
+    return 1;
+}
+
+fn queryWindowExposeHandler(
+    win: ?*t.TickitWindow,
+    _: t.TickitEventFlags,
+    _info: ?*anyopaque,
+    _ctx: ?*anyopaque,
+) callconv(.c) c_int {
+    const info: *t.TickitExposeEventInfo = if (_info != null) @ptrCast(@alignCast(_info)) else {
+        return 0;
+    };
+
+    const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
+        return 0;
+    };
+
+    const rb = info.rb.?;
+
+    const command = std.fmt.allocPrint(ctx.alloc, "jq > {s}", .{ctx.engine.get_command()}) catch {
+        return 0;
+    };
+    defer ctx.alloc.free(command);
+
+    t.tickit_renderbuffer_clear(rb);
+    _ = t.tickit_renderbuffer_text_at(rb, 0, 0, command.ptr);
+
+    t.tickit_window_set_cursor_position(win, 0, @intCast(command.len));
 
     return 1;
 }
@@ -352,6 +384,17 @@ fn resultWindowExposeHandler(
     return 1;
 }
 
+fn suggestionWindowExposeHandler(
+    _: ?*t.TickitWindow,
+    _: t.TickitEventFlags,
+    _info: ?*anyopaque,
+    _ctx: ?*anyopaque,
+) callconv(.c) c_int {
+    _ = _info;
+    _ = _ctx;
+    // get candidates free the candidates at the end.
+}
+
 fn resizeCallback(
     rootWindow: ?*t.TickitWindow,
     _: c_uint,
@@ -468,7 +511,7 @@ pub fn configureTUI(self: *View, app: *App) void {
         self.command_window,
         t.TICKIT_WINDOW_ON_EXPOSE,
         0,
-        commandWindowExposeHandler,
+        queryWindowExposeHandler,
         app,
     );
 
