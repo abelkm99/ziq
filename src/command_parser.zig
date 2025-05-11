@@ -10,7 +10,7 @@ const OldQuery =
     \\ tostream | select(length==2) | .[0] | map(if type=="number" then "["+tostring+"]" else "."+tostring end) | join("")
 ;
 
-// TODO: make the length dynamic with `paths | select(length <= n)` so it can handle larger inputs n == 0 means disbale suggestion
+// FIX: make the length dynamic with `paths | select(length <= n)` so it can handle larger inputs n == 0 means disbale suggestion
 const Query =
     \\ paths | map(if type=="number" then ".[\(. )]" elif test("^[A-Za-z_][A-Za-z0-9_]*$") then ".\(.)" else ".\(@json)" end) | join("\u001F")
 ;
@@ -28,7 +28,6 @@ const Command = struct {
 
     fn deinit(self: *Command, alloc: std.mem.Allocator) void {
         if (self.is_root_node) {
-            std.debug.print("deininting a node\n", .{});
             self.sroot_node.deinit(alloc);
         }
     }
@@ -55,7 +54,6 @@ const JQEngine = struct {
     }
 
     fn deinit(self: *This) void {
-        std.debug.print("got {d} elemnts\n", .{self.commands.items.len});
         self.query.deinit();
         for (self.commands.items) |*command| {
             command.deinit(self.alloc);
@@ -81,10 +79,8 @@ const JQEngine = struct {
         var candidates = std.ArrayList([]const u8).init(alloc);
         defer candidates.deinit();
         var it = std.mem.splitSequence(u8, clean_stdout, "\n");
-        std.debug.print("populating candidates \n", .{});
         while (it.next()) |part| {
             if (part.len > 0) {
-                std.debug.print("-> {s}\n", .{part[1 .. part.len - 1]});
                 const start_node = try Node.gerOrCreateNode(alloc, node, part[1..1]);
                 try Node.insert(alloc, start_node, part[1 .. part.len - 1]);
             }
@@ -143,7 +139,6 @@ const JQEngine = struct {
         const ch = self.query.items[idx];
 
         if (idx == 0) {
-            std.debug.print("update when idx is zero\n", .{});
             return .{
                 // regardless
                 .is_root_node = true,
@@ -186,7 +181,6 @@ const JQEngine = struct {
     }
 
     fn insert(self: *This, ch: u8, idx: usize) !void {
-        std.debug.print("adding {c} @ {d}\n", .{ ch, idx });
         try self.query.insert(idx, ch);
         try self.recalc(idx);
     }
@@ -195,11 +189,26 @@ const JQEngine = struct {
         return self.query.items;
     }
 
-    fn pop_back() !void {
-        try pop_idx();
+    fn pop_back(self: *This) !void {
+        try self.pop_idx(self.query.items.len - 1);
     }
-    fn pop_idx(idx: usize) !void {
-        _ = idx;
+    fn pop_idx(self: *This, idx: usize) !void {
+        if (idx >= self.query.items.len) {
+            // ignore pop if list already empty
+            return;
+        }
+        const ln = self.query.items.len;
+        std.mem.copyForwards(u8, self.query.items[idx .. ln - 1], self.query.items[idx + 1 ..]);
+        const tangling_command = self.commands.items[idx];
+        std.mem.copyForwards(Command, self.commands.items[idx .. ln - 1], self.commands.items[idx + 1 ..]);
+
+        if (idx > 0 and tangling_command.is_root_node) {
+            Node.deinit(tangling_command.sroot_node, self.alloc);
+        }
+
+        _ = self.query.pop();
+        _ = self.commands.pop();
+        try self.recalc(idx);
     }
 
     fn recalc(self: *This, idx: usize) !void {
@@ -238,101 +247,91 @@ fn checkCandidates(
     }
 }
 
-// test "test command parser" {
-//     const alloc = testing.allocator;
+test "test command parser" {
+    const alloc = testing.allocator;
 
-//     {
-//         // const json = std.fs.cwd().readFileAlloc(alloc, "test.json", std.math.maxInt(usize)) catch |err| {
-//         //     std.debug.print("Error: {s}\n", .{@errorName(err)});
-//         //     return;
-//         // };
-//         var json: []const u8 =
-//             \\{
-//             \\    "name": "John",
-//             \\    "age": 30,
-//             \\    "city": "New York",
-//             \\    "cars": [
-//             \\        {
-//             \\          "model": "Ford",
-//             \\          "mpg": 25.1
-//             \\        },
-//             \\        {
-//             \\          "model": "BMW",
-//             \\          "mpg": 27.5
-//             \\        }
-//             \\    ]
-//             \\}
-//             \\
-//         ;
+    {
+        var json: []const u8 =
+            \\{
+            \\    "name": "John",
+            \\    "age": 30,
+            \\    "city": "New York",
+            \\    "cars": [
+            \\        {
+            \\          "model": "Ford",
+            \\          "mpg": 25.1
+            \\        },
+            \\        {
+            \\          "model": "BMW",
+            \\          "mpg": 27.5
+            \\        }
+            \\    ]
+            \\}
+            \\
+        ;
 
-//         var std_out: []u8 = &[_]u8{};
-//         var std_err: []u8 = &[_]u8{};
-//         _ = &std_out;
-//         _ = &std_err;
-//         defer {
-//             alloc.free(std_out);
-//             alloc.free(std_err);
-//         }
-//         // for suggestion use the previous data and give them sometihgn
+        var std_out: []u8 = &[_]u8{};
+        var std_err: []u8 = &[_]u8{};
+        _ = &std_out;
+        _ = &std_err;
+        defer {
+            alloc.free(std_out);
+            alloc.free(std_err);
+        }
+        // for suggestion use the previous data and give them sometihgn
 
-//         var engine = JQEngine.init(alloc, &json);
-//         defer engine.deinit();
-//         try engine.generateCandidates(engine.root, 0, engine.json_input.*);
+        var engine = JQEngine.init(alloc, &json);
+        defer engine.deinit();
+        try engine.generateCandidates(engine.root, 0, engine.json_input.*);
 
-//         // Command: "."
-//         try engine.add('.');
-//         {
-//             const candidates_after_dot = try engine.get_candidate_idx(0, 5);
-//             defer free_candidates(engine.alloc, candidates_after_dot);
+        try engine.add('.');
+        {
+            const candidates_after_dot = try engine.get_candidate_idx(0, 5);
+            defer free_candidates(engine.alloc, candidates_after_dot);
 
-//             // std.debug.print("\nCandidates after '.': (command: '{s}', idx: 0)\n", .{engine.get_command()});
-//             // for (candidates_after_dot) |part| {
-//             //     std.debug.print("  Value: '{s}'\n", .{part.value});
-//             // }
+            const expected_after_dot = [_][]const u8{
+                "age",
+                "name",
+                "cars",
+                "city",
+                "cars.[1]",
+            };
+            try checkCandidates(alloc, candidates_after_dot, &expected_after_dot);
+        }
 
-//             const expected_after_dot = [_][]const u8{
-//                 "age",
-//                 "name",
-//                 "cars",
-//                 "city",
-//                 "cars.[1]",
-//             };
-//             try checkCandidates(alloc, candidates_after_dot, &expected_after_dot);
-//         }
+        try engine.add('c');
+        {
+            const candidates_after_c = try engine.get_candidate_idx(1, 5); // idx=1 refers to 'c'
+            defer free_candidates(engine.alloc, candidates_after_c);
 
-//         try engine.add('c');
-//         {
-//             const candidates_after_c = try engine.get_candidate_idx(1, 5); // idx=1 refers to 'c'
-//             defer free_candidates(engine.alloc, candidates_after_c);
+            const expected_after_c = [_][]const u8{
+                "ars",
+                "ity",
+                "ars.[1]",
+                "ars.[0]",
+                "ars.[1].mpg",
+            };
+            try checkCandidates(alloc, candidates_after_c, &expected_after_c);
+        }
 
-//             const expected_after_c = [_][]const u8{
-//                 "ars",
-//                 "ity",
-//                 "ars.[1]",
-//                 "ars.[0]",
-//                 "ars.[1].mpg",
-//             };
-//             try checkCandidates(alloc, candidates_after_c, &expected_after_c);
-//         }
+        for ("ars | .") |ch| {
+            try engine.add(ch);
+        }
 
-//         for ("ars | .") |ch| {
-//             try engine.add(ch);
-//         }
+        {
+            const candidates_after_second_dot = try engine.get_candidate_idx(engine.query.items.len - 1, 4);
+            defer free_candidates(engine.alloc, candidates_after_second_dot);
 
-//         {
-//             const candidates_after_second_dot = try engine.get_candidate_idx(engine.query.items.len - 1, 4);
-//             defer free_candidates(engine.alloc, candidates_after_second_dot);
-
-//             const expected_after_second_dot = [_][]const u8{
-//                 "[1]",
-//                 "[0]",
-//                 "[1].mpg",
-//                 "[0].mpg",
-//             };
-//             try checkCandidates(alloc, candidates_after_second_dot, &expected_after_second_dot);
-//         }
-//     }
-// }
+            const expected_after_second_dot = [_][]const u8{
+                "[1]",
+                "[0]",
+                "[1].mpg",
+                "[0].mpg",
+            };
+            try checkCandidates(alloc, candidates_after_second_dot, &expected_after_second_dot);
+        }
+    }
+}
 
 test "insert a node in the middle" {
     const alloc = testing.allocator;
@@ -365,43 +364,39 @@ test "insert a node in the middle" {
     }
 
     {
-        // var engine = JQEngine.init(alloc, &json);
-        // defer engine.deinit();
-        // try engine.generateCandidates(engine.root, 0, engine.json_input.*);
-        // const input = "tostring | fromjson | .ar";
-        // for (input) |ch| {
-        //     try engine.add(ch);
-        // }
-        // var candidates = try engine.get_candidate_idx(input.len - 1, 5);
-        // _ = &candidates;
-        // defer free_candidates(alloc, candidates);
+        var engine = JQEngine.init(alloc, &json);
+        defer engine.deinit();
+        try engine.generateCandidates(engine.root, 0, engine.json_input.*);
+        const input = " tostring | fromjson | .ar";
+        for (input) |ch| {
+            try engine.add(ch);
+        }
+        var candidates = try engine.get_candidate_idx(input.len - 1, 5);
+        _ = &candidates;
+        defer free_candidates(alloc, candidates);
 
-        // try checkCandidates(alloc, candidates, &[_][]const u8{});
-        // // now insert at position 23 (after . the value of c)
-        // try engine.insert('c', 23);
+        try checkCandidates(alloc, candidates, &[_][]const u8{});
+        // now insert at position 24 (after . the value of c)
+        try engine.insert('c', 24);
 
-        // free_candidates(alloc, candidates); // free the previous ones
+        free_candidates(alloc, candidates); // free the previous ones
 
-        // candidates = try engine.get_candidate_idx(engine.query.items.len - 1, 5);
-        // for (candidates) |part| {
-        //     std.debug.print("{s}\n", .{part.value});
-        // }
-        // var expected_candidates = [_][]const u8{
-        //     "s",
-        //     "s.[1]",
-        //     "s.[0]",
-        //     "s.[1].mpg",
-        //     "s.[0].mpg",
-        // };
-        // try checkCandidates(alloc, candidates, &expected_candidates);
+        candidates = try engine.get_candidate_idx(engine.query.items.len - 1, 5);
+        var expected_candidates = [_][]const u8{
+            "s",
+            "s.[1]",
+            "s.[0]",
+            "s.[1].mpg",
+            "s.[0].mpg",
+        };
+        try checkCandidates(alloc, candidates, &expected_candidates);
 
-        // free_candidates(alloc, candidates); // free the previous ones
-        // try engine.insert('|', 1);
-        // try engine.insert(' ', 0);
-        // try engine.insert('.', 0);
-        // std.debug.print("command is {s}\n", .{engine.get_command()});
-        // candidates = try engine.get_candidate_idx(engine.query.items.len - 1, 5);
-        // try checkCandidates(alloc, candidates, &expected_candidates);
+        for ("| .") |ch| {
+            try engine.insert(ch, 0);
+        }
+        free_candidates(alloc, candidates); // free the previous ones
+        candidates = try engine.get_candidate_idx(engine.query.items.len - 1, 5);
+        try checkCandidates(alloc, candidates, &expected_candidates);
     }
     {
         var engine = JQEngine.init(alloc, &json);
@@ -413,7 +408,6 @@ test "insert a node in the middle" {
         }
         try engine.insert('.', 0);
         // try engine.insert('.', 0);
-        std.debug.print("query is {s} \n", .{engine.get_command()});
         var candidates = try engine.get_candidate_idx(engine.query.items.len - 1, 5);
         _ = &candidates;
         var expected_candidates = [_][]const u8{
@@ -426,5 +420,133 @@ test "insert a node in the middle" {
 
         defer free_candidates(alloc, candidates);
         try checkCandidates(alloc, candidates, &expected_candidates);
+    }
+}
+
+test "pop item from the end" {
+    const alloc = testing.allocator;
+    var json: []const u8 =
+        \\{
+        \\    "name": "John",
+        \\    "age": 30,
+        \\    "city": "New York",
+        \\    "cars": [
+        \\        {
+        \\          "model": "Ford",
+        \\          "mpg": 25.1
+        \\        },
+        \\        {
+        \\          "model": "BMW",
+        \\          "mpg": 27.5
+        \\        }
+        \\    ]
+        \\}
+        \\
+    ;
+
+    var std_out: []u8 = &[_]u8{};
+    var std_err: []u8 = &[_]u8{};
+    _ = &std_out;
+    _ = &std_err;
+    defer {
+        alloc.free(std_out);
+        alloc.free(std_err);
+    }
+    {
+        var engine = JQEngine.init(alloc, &json);
+        defer engine.deinit();
+        try engine.generateCandidates(engine.root, 0, engine.json_input.*);
+        const input = ".cbe";
+        for (input) |ch| {
+            try engine.add(ch);
+        }
+
+        var candidates = try engine.get_candidate_idx(input.len - 1, 5);
+        _ = &candidates;
+        defer free_candidates(alloc, candidates);
+
+        try engine.pop_back();
+        try engine.pop_back();
+
+        // pop and check
+
+        var expected_values = [_][]const u8{
+            "ars",
+            "ity",
+            "ars.[1]",
+            "ars.[0]",
+            "ars.[1].mpg",
+        };
+
+        free_candidates(alloc, candidates); // free the previous ones
+        candidates = try engine.get_candidate_idx(engine.query.items.len - 1, 5);
+
+        try checkCandidates(alloc, candidates, &expected_values);
+    }
+    {
+        var engine = JQEngine.init(alloc, &json);
+        defer engine.deinit();
+        try engine.generateCandidates(engine.root, 0, engine.json_input.*);
+        const input = "dars";
+        for (input) |ch| {
+            try engine.add(ch);
+        }
+
+        var candidates = try engine.get_candidate_idx(engine.get_command().len, 5);
+        _ = &candidates;
+        defer free_candidates(alloc, candidates);
+        try checkCandidates(alloc, candidates, &[_][]const u8{});
+
+        try engine.pop_idx(0);
+        try engine.insert('c', 0);
+        try engine.insert('.', 0);
+
+        free_candidates(alloc, candidates);
+        candidates = try engine.get_candidate_idx(engine.get_command().len - 1, 5);
+
+        var expected_values = [_][]const u8{
+            ".[1]",
+            ".[0]",
+            ".[1].mpg",
+            ".[0].mpg",
+            ".[1].model",
+        };
+        try checkCandidates(alloc, candidates, &expected_values);
+    }
+    // test with pop a segment node and see how it's going to to react
+    {
+        var engine = JQEngine.init(alloc, &json);
+        defer engine.deinit();
+        try engine.generateCandidates(engine.root, 0, engine.json_input.*);
+        const input = ".cars | .[0]";
+        for (input) |ch| {
+            try engine.add(ch);
+        }
+
+        try engine.pop_idx(5);
+        try engine.pop_idx(5);
+        try engine.pop_idx(5);
+
+        var candidates = try engine.get_candidate_idx(engine.get_command().len - 1, 100);
+        _ = &candidates;
+        defer free_candidates(alloc, candidates);
+
+        var expected_candidate = [_][]const u8{
+            ".mpg",
+            ".model",
+        };
+
+        try checkCandidates(alloc, candidates, &expected_candidate);
+
+        // pop everything
+        for (0..engine.get_command().len) |_| {
+            try engine.pop_back();
+        }
+        for (".nam") |ch| {
+            try engine.add(ch);
+        }
+        free_candidates(alloc, candidates);
+        candidates = try engine.get_candidate_idx(engine.get_command().len - 1, 100);
+        try checkCandidates(alloc, candidates, &[_][]const u8{"e"});
     }
 }
