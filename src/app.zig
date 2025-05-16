@@ -44,7 +44,7 @@ pub fn init(alloc: std.mem.Allocator) !App {
 }
 
 pub fn deinit(self: *App) void {
-    std.log.info("closing app\n", .{});
+    // std.log.info("closing app\n", .{});
     if (self.view) |v| v.deinit();
 
     if (self.parsedBuffer) |data| {
