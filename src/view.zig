@@ -34,6 +34,7 @@ command_window: *t.TickitWindow,
 errorWindow: *t.TickitWindow,
 resultWindow: *t.TickitWindow,
 last_scroll_event: i64 = 0,
+last_key_press_event: i64 = 0,
 state: bool = true,
 
 fn normalizeWindow(
@@ -76,31 +77,38 @@ fn handleProcessBackground(ctx: *App) void {
     t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
 }
 
+fn updateSuggestionEvent(_: ?*t.Tickit, _: t.TickitEventFlags, _: ?*anyopaque, _view: ?*anyopaque) callconv(.c) c_int {
+    const view: *View = if (_view != null) @ptrCast(@alignCast(_view)) else {
+        return 0;
+    };
+
+    t.tickit_window_expose(view.command_window, null);
+
+    _ = t.tickit_watch_timer_after_msec(view.tickit, 10, 0, updateSuggestionEvent, view);
+    return 1;
+}
+
 fn getSuggestionBackground(app: *App) void {
     _ = &app;
     // app.lock.lock();
     // defer app.lock.unlock();
-    // const command = app.engine.get_command();
-    // const ln: usize = command.len;
-    // if (ln > 0) {
-    //     app.engine.recalc(ln - 1, app.input_buffer) catch unreachable;
-    // }
+    const command = app.engine.get_command();
+    const ln: usize = command.len;
+    if (ln > 0) {
+        app.engine.recalc(ln - 1, app.input_buffer) catch unreachable;
+    }
 
-    // // free the previous suggestions
-    // for (app.suggestions) |suggestion| {
-    //     app.alloc.free(suggestion.value);
-    // }
-    // app.alloc.free(app.suggestions);
+    // free the previous suggestions
+    for (app.suggestions) |suggestion| {
+        app.alloc.free(suggestion.value);
+    }
+    app.alloc.free(app.suggestions);
 
     // // get a new set of suggestions
 
-    // if (command.len >= 1) {
-    //     app.suggestions = app.engine.get_candidate_idx(command.len - 1, 10) catch unreachable;
-    // }
+    app.suggestions = app.engine.get_candidate_idx(command.len - 1, 10) catch unreachable;
 
-    // for (app.suggestions) |suggestion| {
-    //     std.debug.print("{s}\n", .{suggestion.value});
-    // }
+    t.tickit_tick(app.view.?.tickit, t.TICKIT_RUN_NOHANG);
 }
 
 fn mouseScrollEventHandler(
@@ -171,7 +179,20 @@ fn keyboardClickEventHandler(
         return 0;
     };
 
+    const current_time = std.time.milliTimestamp();
+    if (current_time - ctx.view.?.last_key_press_event < THROTTLE_INTERVAL) {
+        return 1;
+    }
+
+    ctx.view.?.last_key_press_event = current_time;
+
     const input: [:0]const u8 = std.mem.span(info.str);
+
+    // std.debug.print("key -> {s}\n", .{input});
+    if (std.mem.eql(u8, input, "Escape")) {
+        return 1;
+    }
+
 
     // check for suspoend operation
 
@@ -185,11 +206,8 @@ fn keyboardClickEventHandler(
         return 1;
     }
 
-    // this shuld have been done in the background
-
     if (std.mem.eql(u8, input, "Backspace")) {
         _ = ctx.engine.pop_back() catch unreachable;
-        // FIXME: this is a heavy operation and the recalc should have been done on the background.
     }
 
     if (input.len == 1) {
@@ -198,10 +216,11 @@ fn keyboardClickEventHandler(
         }
     }
 
-    getSuggestionBackground(ctx);
+    // getSuggestionBackground(ctx);
     t.tickit_window_expose(ctx.view.?.command_window, null);
     t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
 
+    getSuggestionBackground(ctx);
     // _ = std.Thread.spawn(.{}, getSuggestionBackground, .{ctx}) catch unreachable;
     _ = std.Thread.spawn(.{}, handleProcessBackground, .{ctx}) catch unreachable;
 
@@ -214,7 +233,6 @@ fn queryWindowExposeHandler(
     _info: ?*anyopaque,
     _ctx: ?*anyopaque,
 ) callconv(.c) c_int {
-
     const info: *t.TickitExposeEventInfo = if (_info != null) @ptrCast(@alignCast(_info)) else {
         return 0;
     };
@@ -222,10 +240,6 @@ fn queryWindowExposeHandler(
     const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
         return 0;
     };
-    std.debug.print("initial print, {d}\n", .{ctx.suggestions.len});
-    for(ctx.suggestions) |suggestion| {
-        std.debug.print("{s}\n", .{suggestion.value});
-    }
 
     const rb = info.rb.?;
 
@@ -241,6 +255,7 @@ fn queryWindowExposeHandler(
         defer t.tickit_pen_unref(suggestion_pen);
         _ = t.tickit_pen_set_colour_attr(suggestion_pen, t.TICKIT_PEN_FG, 8);
         t.tickit_renderbuffer_setpen(rb, suggestion_pen);
+        // discard the one that has been written alrady
         _ = t.tickit_renderbuffer_textn_at(rb, 0, @intCast(command.len), ctx.suggestions[0].value.ptr, ctx.suggestions[0].value.len);
         t.tickit_renderbuffer_restore(rb);
     }
@@ -556,6 +571,8 @@ pub fn configureTUI(self: *View, app: *App) void {
 
 pub fn run(self: *View) void {
     t.tickit_window_take_focus(self.command_window);
+
+    _ = t.tickit_watch_timer_after_msec(self.tickit, 10, 0, updateSuggestionEvent, self);
 
     t.tickit_run(self.tickit);
 }

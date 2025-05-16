@@ -69,6 +69,13 @@ pub fn deinit(self: *App) void {
         self.alloc.free(buff);
     }
 
+
+    // clean up the suggestion
+    for (self.suggestions) |suggestion| {
+        self.alloc.free(suggestion.value);
+    }
+    self.alloc.free(self.suggestions);
+
     self.alloc.free(self.input_buffer);
 }
 
@@ -143,11 +150,6 @@ pub fn run(self: *App) !void {
     try self.engine.add('.');
     try self.engine.recalc(0, self.input_buffer);
     self.suggestions = self.engine.get_candidate_idx(0, 10) catch unreachable;
-
-    std.debug.print("inside App.run initial print, {d}\n", .{self.suggestions.len});
-    for(self.suggestions) |suggestion| {
-        std.debug.print("{s}\n", .{suggestion.value});
-    }
 
     try self.processCommand(self.engine.get_command());
 

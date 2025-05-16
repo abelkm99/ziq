@@ -160,6 +160,7 @@ pub const JQEngine = struct {
             };
         }
         // if ch == "." -> and prev_node is null start giving suggestion.
+
         const s_root_node = self.commands.items[idx - 1].sroot_node;
         if (ch == '.' and self.commands.items[idx - 1].current_node == null) {
             // start from the current segment root node
@@ -198,16 +199,20 @@ pub const JQEngine = struct {
             return;
         }
         const ln = self.query.items.len;
-        std.mem.copyForwards(u8, self.query.items[idx .. ln - 1], self.query.items[idx + 1 ..]);
-        const tangling_command = self.commands.items[idx];
-        std.mem.copyForwards(Command, self.commands.items[idx .. ln - 1], self.commands.items[idx + 1 ..]);
 
-        if (idx > 0 and tangling_command.is_root_node) {
-            Node.deinit(tangling_command.sroot_node, self.alloc);
+        if (idx < self.query.items.len) {
+            std.mem.copyForwards(u8, self.query.items[idx .. ln - 1], self.query.items[idx + 1 ..]);
+            _ = self.query.pop();
         }
-
-        _ = self.query.pop();
-        _ = self.commands.pop();
+        if (idx < self.commands.items.len) {
+            const tangling_command = self.commands.items[idx];
+            std.mem.copyForwards(Command, self.commands.items[idx .. ln - 1], self.commands.items[idx + 1 ..]);
+            // only deinit when it's not tangling window is a root node and is not the first root node since we are using that for other usecases
+            if (idx > 0 and tangling_command.is_root_node) {
+                Node.deinit(tangling_command.sroot_node, self.alloc);
+            }
+            _ = self.commands.pop();
+        }
     }
 
     pub fn recalc(self: *This, idx: usize, input_buffer: []const u8) !void {
