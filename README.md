@@ -19,7 +19,7 @@
 
 ### Installation
 
-1. **Download the binary** for your platform. from the [lastest releases](https://github.com/abelkm99/ziq/releases) For example, on Apple Silicon (ARM) macOS download ziq_mac_arm.
+1. **Download the binary** for your platform. from the [latest releases](https://github.com/abelkm99/ziq/releases) For example, on Apple Silicon (ARM) macOS download ziq_mac_arm.
 
 2. **Rename the file** to `ziq`:
 
