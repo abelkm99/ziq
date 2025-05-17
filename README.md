@@ -59,6 +59,8 @@ cat data.json | ziq
 ziq < ./data.json
 ```
 
+
+
 ### Contributing
 
 Contributions are welcome! Feel free to open issues or pull requests on the [GitHub repository](https://github.com/abelkm99/ziq).
