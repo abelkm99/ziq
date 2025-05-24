@@ -203,9 +203,7 @@ pub const JQEngine = struct {
             _ = self.query.pop();
         }
         if (idx < self.commands.items.len) {
-            std.debug.print("poing an item\n", .{});
             const tangling_command = self.commands.items[idx];
-            std.debug.print("{any}\n", .{tangling_command});
             std.mem.copyForwards(Command, self.commands.items[idx .. ln - 1], self.commands.items[idx + 1 ..]);
             // only deinit when it's not tangling window is a root node and is not the first root node since we are using that for other usecases
             if (idx > 0 and tangling_command.is_root_node) {
@@ -218,7 +216,6 @@ pub const JQEngine = struct {
 
     pub fn recalc(self: *This, idx: usize, input_buffer: []const u8) !void {
         for (idx..self.query.items.len) |i| {
-            std.debug.print("got here for {d}, char is {c}", .{i, self.query.items[i]});
             const command = try self.updateCandidatesForIdx(i, input_buffer);
             if (i < self.commands.items.len) {
                 // if it's root node

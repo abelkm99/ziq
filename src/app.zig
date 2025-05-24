@@ -28,27 +28,28 @@ engine: Engine,
 pub fn init(alloc: std.mem.Allocator) !App {
     // get the input buffer in here
 
-    var input_buffer = get_input(alloc) catch |err| {
+    const input_buffer = get_input(alloc) catch |err| {
         std.log.err("error {any} ", .{@errorName(err)});
         @panic("error reading the data");
     };
-    return App{
+    var app = App{
         .alloc = alloc,
         .input_buffer = input_buffer,
         .stdout_buffer = &[_]u8{},
         .stderr_buffer = &[_]u8{},
         .errorBuffer = &[_][]const u8{},
         .parsedBuffer = &[_][]const u8{},
-        .engine = Engine.init(alloc, &input_buffer),
+        .engine = undefined,
         .suggestions = &[_]Candidate{},
         .CadidateMemory = std.ArrayList([]Candidate).init(alloc),
     };
+    app.engine = Engine.init(alloc, &app.input_buffer);
+    return app;
 }
 
 pub fn deinit(self: *App) void {
     // std.log.info("closing app\n", .{});
     if (self.view) |v| v.deinit();
-
 
     if (self.parsedBuffer) |data| {
         for (data) |part| {
@@ -85,7 +86,6 @@ pub fn deinit(self: *App) void {
         self.alloc.free(suggestion.value);
     }
     self.alloc.free(self.suggestions);
-
 
     self.alloc.free(self.input_buffer);
 }
@@ -160,9 +160,8 @@ pub fn run(self: *App) !void {
     try self.engine.generateCandidates(self.engine.root, 0, self.engine.json_input.*);
     try self.engine.add('.');
     try self.engine.recalc(0, self.input_buffer);
-    self.suggestions = self.engine.get_candidate_idx(0, 10) catch unreachable;
+    self.suggestions = try self.engine.get_candidate_idx(0, 10);
 
-    std.debug.print("command length is {d}\n", .{self.engine.get_command().len});
     try self.processCommand(self.engine.get_command());
 
     var v = View.init();

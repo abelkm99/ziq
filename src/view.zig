@@ -11,7 +11,7 @@ pub const View = @This();
 const std = @import("std");
 const App = @import("app.zig").App;
 const THROTTLE_INTERVAL = 30;
-const KEY_PRESS_INTERVAL = 50;
+const KEY_PRESS_INTERVAL = 30;
 const CURSOR_JUMP = 3;
 const ERROR_RATIO = NormalizedStruct{
     .nx = 0.7,
@@ -95,16 +95,12 @@ fn getSuggestionBackground(app: *App, recalc_pos: usize) void {
     const command = app.engine.get_command();
     const ln: usize = command.len;
     if (ln > 0) {
-        std.debug.print(" started & {d}\n", .{std.time.milliTimestamp()});
-        defer std.debug.print("finished & {d}\n", .{std.time.milliTimestamp()});
         app.engine.recalc(recalc_pos, app.input_buffer) catch unreachable;
 
         app.CadidateMemory.append(app.suggestions) catch unreachable;
 
         app.suggestions = app.engine.get_candidate_idx(command.len - 1, 10) catch unreachable;
     }
-
-    std.debug.print("len is {d} \n", .{command.len});
 
     t.tickit_tick(app.view.?.tickit, t.TICKIT_RUN_NOHANG);
 }
@@ -186,7 +182,6 @@ fn keyboardClickEventHandler(
 
     const input: [:0]const u8 = std.mem.span(info.str);
 
-    // std.debug.print("key -> {s}\n", .{input});
     if (std.mem.eql(u8, input, "Escape")) {
         return 1;
     }
@@ -209,7 +204,6 @@ fn keyboardClickEventHandler(
         _ = ctx.engine.pop_back() catch unreachable;
         recalc_pos -= 2;
     }
-    std.debug.print("input is {s}\n", .{input});
 
     if (std.mem.eql(u8, input, "Tab")) {
         if (ctx.suggestions.len > 0) {
@@ -232,9 +226,7 @@ fn keyboardClickEventHandler(
     t.tickit_window_expose(ctx.view.?.command_window, null);
     t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
 
-    std.debug.print("{d} get suggestions for {s} \n", .{ @divTrunc(std.time.milliTimestamp(), 100), input });
     getSuggestionBackground(ctx, recalc_pos);
-    std.debug.print("{d} finished suggestion for {s} \n", .{ @divTrunc(std.time.milliTimestamp(), 100), input });
     t.tickit_window_expose(ctx.view.?.command_window, null);
     t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
 
@@ -257,9 +249,6 @@ fn queryWindowExposeHandler(
     const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
         return 0;
     };
-
-    std.debug.print("initial expose window rendered\n", .{});
-    std.debug.print("command length is {d}\n", .{ctx.engine.get_command().len});
 
     const rb = info.rb.?;
 
