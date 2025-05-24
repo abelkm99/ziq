@@ -61,6 +61,10 @@ ziq < ./data.json
 
 
 
+https://github.com/user-attachments/assets/f62c4db8-01ba-4b7a-9762-718095f0d4a4
+
+
+
 ### Contributing
 
 Contributions are welcome! Feel free to open issues or pull requests on the [GitHub repository](https://github.com/abelkm99/ziq).
