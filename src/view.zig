@@ -88,23 +88,20 @@ fn updateSuggestionEvent(_: ?*t.Tickit, _: t.TickitEventFlags, _: ?*anyopaque, _
     return 1;
 }
 
-fn getSuggestionBackground(app: *App) void {
+fn getSuggestionBackground(app: *App, recalc_pos: usize) void {
     _ = &app;
-    // app.lock.lock();
-    // defer app.lock.unlock();
 
     const command = app.engine.get_command();
     const ln: usize = command.len;
     if (ln > 0) {
         std.debug.print(" started & {d}\n", .{std.time.milliTimestamp()});
         defer std.debug.print("finished & {d}\n", .{std.time.milliTimestamp()});
-        app.engine.recalc(ln - 1, app.input_buffer) catch unreachable;
+        app.engine.recalc(recalc_pos, app.input_buffer) catch unreachable;
 
         app.CadidateMemory.append(app.suggestions) catch unreachable;
 
         app.suggestions = app.engine.get_candidate_idx(command.len - 1, 10) catch unreachable;
     }
-
 
     std.debug.print("len is {d} \n", .{command.len});
 
@@ -205,8 +202,23 @@ fn keyboardClickEventHandler(
         return 1;
     }
 
+    var recalc_pos: usize = ctx.engine.get_command().len;
+
     if (std.mem.eql(u8, input, "Backspace")) {
         _ = ctx.engine.pop_back() catch unreachable;
+        recalc_pos -= 2;
+    }
+    std.debug.print("input is {s}\n", .{input});
+
+    if (std.mem.eql(u8, input, "Tab")) {
+        if (ctx.suggestions.len > 0) {
+            for (ctx.suggestions[0].value) |char| {
+                _ = ctx.engine.add(char) catch {};
+            }
+        } else {
+            // if there is no suggestion don't do any reclac that is just put the current recalc_pos = -1;
+            recalc_pos -= 1;
+        }
     }
 
     if (input.len == 1) {
@@ -220,7 +232,7 @@ fn keyboardClickEventHandler(
     t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
 
     std.debug.print("{d} get suggestions for {s} \n", .{ @divTrunc(std.time.milliTimestamp(), 100), input });
-    getSuggestionBackground(ctx);
+    getSuggestionBackground(ctx, recalc_pos);
     std.debug.print("{d} finished suggestion for {s} \n", .{ @divTrunc(std.time.milliTimestamp(), 100), input });
     t.tickit_window_expose(ctx.view.?.command_window, null);
     t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
