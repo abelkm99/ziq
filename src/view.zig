@@ -92,21 +92,21 @@ fn getSuggestionBackground(app: *App) void {
     _ = &app;
     // app.lock.lock();
     // defer app.lock.unlock();
+
     const command = app.engine.get_command();
     const ln: usize = command.len;
     if (ln > 0) {
+        std.debug.print(" started & {d}\n", .{std.time.milliTimestamp()});
+        defer std.debug.print("finished & {d}\n", .{std.time.milliTimestamp()});
         app.engine.recalc(ln - 1, app.input_buffer) catch unreachable;
+
+        app.CadidateMemory.append(app.suggestions) catch unreachable;
+
+        app.suggestions = app.engine.get_candidate_idx(command.len - 1, 10) catch unreachable;
     }
 
-    // free the previous suggestions
-    for (app.suggestions) |suggestion| {
-        app.alloc.free(suggestion.value);
-    }
-    app.alloc.free(app.suggestions);
 
-    // // get a new set of suggestions
-
-    app.suggestions = app.engine.get_candidate_idx(command.len - 1, 10) catch unreachable;
+    std.debug.print("len is {d} \n", .{command.len});
 
     t.tickit_tick(app.view.?.tickit, t.TICKIT_RUN_NOHANG);
 }
@@ -193,7 +193,6 @@ fn keyboardClickEventHandler(
         return 1;
     }
 
-
     // check for suspoend operation
 
     if (info.mod == t.TICKIT_MOD_CTRL and std.mem.eql(u8, input, "C-z")) {
@@ -220,7 +219,12 @@ fn keyboardClickEventHandler(
     t.tickit_window_expose(ctx.view.?.command_window, null);
     t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
 
+    std.debug.print("{d} get suggestions for {s} \n", .{ @divTrunc(std.time.milliTimestamp(), 100), input });
     getSuggestionBackground(ctx);
+    std.debug.print("{d} finished suggestion for {s} \n", .{ @divTrunc(std.time.milliTimestamp(), 100), input });
+    t.tickit_window_expose(ctx.view.?.command_window, null);
+    t.tickit_tick(ctx.view.?.tickit, t.TICKIT_RUN_NOHANG);
+
     // _ = std.Thread.spawn(.{}, getSuggestionBackground, .{ctx}) catch unreachable;
     _ = std.Thread.spawn(.{}, handleProcessBackground, .{ctx}) catch unreachable;
 
@@ -240,6 +244,9 @@ fn queryWindowExposeHandler(
     const ctx: *App = if (_ctx != null) @ptrCast(@alignCast(_ctx)) else {
         return 0;
     };
+
+    std.debug.print("initial expose window rendered\n", .{});
+    std.debug.print("command length is {d}\n", .{ctx.engine.get_command().len});
 
     const rb = info.rb.?;
 
@@ -572,7 +579,7 @@ pub fn configureTUI(self: *View, app: *App) void {
 pub fn run(self: *View) void {
     t.tickit_window_take_focus(self.command_window);
 
-    _ = t.tickit_watch_timer_after_msec(self.tickit, 10, 0, updateSuggestionEvent, self);
+    // _ = t.tickit_watch_timer_after_msec(self.tickit, 10, 0, updateSuggestionEvent, self);
 
     t.tickit_run(self.tickit);
 }

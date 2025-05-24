@@ -10,7 +10,6 @@ const View = @import("view.zig").View;
 const engine_tool = @import("engine.zig");
 const Engine = engine_tool.JQEngine;
 
-
 alloc: std.mem.Allocator,
 
 input_buffer: []const u8,
@@ -19,6 +18,8 @@ stderr_buffer: ?[]u8 = null,
 errorBuffer: ?[][]const u8 = null,
 parsedBuffer: ?[][]const u8 = null,
 suggestions: []Candidate,
+CadidateMemory: std.ArrayList([]Candidate),
+
 lock: Mutex = .{},
 
 view: ?*View = null,
@@ -40,12 +41,14 @@ pub fn init(alloc: std.mem.Allocator) !App {
         .parsedBuffer = &[_][]const u8{},
         .engine = Engine.init(alloc, &input_buffer),
         .suggestions = &[_]Candidate{},
+        .CadidateMemory = std.ArrayList([]Candidate).init(alloc),
     };
 }
 
 pub fn deinit(self: *App) void {
     // std.log.info("closing app\n", .{});
     if (self.view) |v| v.deinit();
+
 
     if (self.parsedBuffer) |data| {
         for (data) |part| {
@@ -69,12 +72,20 @@ pub fn deinit(self: *App) void {
         self.alloc.free(buff);
     }
 
-
-    // clean up the suggestion
+    // // clean up the suggestion
+    for (self.CadidateMemory.items) |suggestions| {
+        // free the previous ones
+        for (suggestions) |suggestion| {
+            self.alloc.free(suggestion.value);
+        }
+        self.alloc.free(suggestions);
+    }
+    self.CadidateMemory.deinit();
     for (self.suggestions) |suggestion| {
         self.alloc.free(suggestion.value);
     }
     self.alloc.free(self.suggestions);
+
 
     self.alloc.free(self.input_buffer);
 }
@@ -151,6 +162,7 @@ pub fn run(self: *App) !void {
     try self.engine.recalc(0, self.input_buffer);
     self.suggestions = self.engine.get_candidate_idx(0, 10) catch unreachable;
 
+    std.debug.print("command length is {d}\n", .{self.engine.get_command().len});
     try self.processCommand(self.engine.get_command());
 
     var v = View.init();

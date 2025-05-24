@@ -42,6 +42,7 @@ pub const JQEngine = struct {
     commands: std.ArrayList(Command),
     root: *Node,
     json_input: *[]const u8,
+    root_nodes: std.ArrayList(*Node),
 
     pub fn init(alloc: std.mem.Allocator, json: *[]const u8) JQEngine {
         return JQEngine{
@@ -50,6 +51,7 @@ pub const JQEngine = struct {
             .commands = std.ArrayList(Command).init(alloc),
             .root = Node.new_node(alloc) catch unreachable,
             .json_input = json,
+            .root_nodes = std.ArrayList(*Node).init(alloc),
         };
     }
 
@@ -63,21 +65,22 @@ pub const JQEngine = struct {
             self.root.deinit(self.alloc); // this is a roll back function that if the the root node is deinited by the command iterator
             // it has to be deinited manuall.
         }
+        for (self.root_nodes.items) |node| {
+            Node.deinit(node, self.alloc);
+        }
+        self.root_nodes.deinit();
     }
 
     /// parse cadidate buffer and populate the trie into the Node
     pub fn parseAndPopulateCandidates(alloc: std.mem.Allocator, node: *Node, candidates_buffer: []const u8) !void {
 
         // remove the sepratator
-        // might move it to util's or not
-
+        // might move it to util's
         const ln = std.mem.replacementSize(u8, candidates_buffer, "\\u001f", "");
         var clean_stdout = try alloc.alloc(u8, ln);
         defer alloc.free(clean_stdout);
         _ = std.mem.replace(u8, candidates_buffer, "\\u001f", "", clean_stdout[0..]);
 
-        var candidates = std.ArrayList([]const u8).init(alloc);
-        defer candidates.deinit();
         var it = std.mem.splitSequence(u8, clean_stdout, "\n");
         while (it.next()) |part| {
             if (part.len > 0) {
@@ -87,7 +90,7 @@ pub const JQEngine = struct {
         }
     }
 
-    /// This function generate all possibel candidates and generates a trie node
+    /// This function generate all possible candidates and generates a trie node
     /// generate_candidate is called once for one segment of the command
     /// one segment of command is a jq command that is separated by | character
     /// i.e jq '.user' | '.name'  this example will be two segments
@@ -108,11 +111,6 @@ pub const JQEngine = struct {
         if (jq_res.status) {
             try parseAndPopulateCandidates(self.alloc, node, jq_res.std_out);
         }
-
-        var current = std.ArrayList(u8).init(self.alloc);
-        defer current.deinit();
-        var result = std.ArrayList(Candidate).init(self.alloc);
-        defer result.deinit();
     }
 
     pub fn get_candidate_idx(self: *This, idx: usize, n: usize) ![]Candidate {
@@ -205,11 +203,14 @@ pub const JQEngine = struct {
             _ = self.query.pop();
         }
         if (idx < self.commands.items.len) {
+            std.debug.print("poing an item\n", .{});
             const tangling_command = self.commands.items[idx];
+            std.debug.print("{any}\n", .{tangling_command});
             std.mem.copyForwards(Command, self.commands.items[idx .. ln - 1], self.commands.items[idx + 1 ..]);
             // only deinit when it's not tangling window is a root node and is not the first root node since we are using that for other usecases
             if (idx > 0 and tangling_command.is_root_node) {
-                Node.deinit(tangling_command.sroot_node, self.alloc);
+                try self.root_nodes.append(tangling_command.sroot_node);
+                // Node.deinit(tangling_command.sroot_node, self.alloc);
             }
             _ = self.commands.pop();
         }
@@ -217,11 +218,13 @@ pub const JQEngine = struct {
 
     pub fn recalc(self: *This, idx: usize, input_buffer: []const u8) !void {
         for (idx..self.query.items.len) |i| {
+            std.debug.print("got here for {d}, char is {c}", .{i, self.query.items[i]});
             const command = try self.updateCandidatesForIdx(i, input_buffer);
             if (i < self.commands.items.len) {
                 // if it's root node
                 if (self.commands.items[i].is_root_node and i != 0) {
-                    self.commands.items[i].deinit(self.alloc); // free the previous node. why exclude zero
+                    try self.root_nodes.append(self.commands.items[i].sroot_node);
+                    // self.commands.items[i].deinit(self.alloc); // free the previous node. why exclude zero
                     // for index zero i want to free it at the end. (just a small optimization)
                 }
                 self.commands.items[i] = command;
