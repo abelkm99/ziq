@@ -59,6 +59,9 @@ cat data.json | ziq
 ziq < ./data.json
 ```
 
+## MAC OS Error.
+- navigate to privacy and security tab under setting scroll down and make sure to allow running `ziq`.
+
 
 
 https://github.com/user-attachments/assets/f62c4db8-01ba-4b7a-9762-718095f0d4a4
