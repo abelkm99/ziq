@@ -21,36 +21,3 @@ pub fn main() !void {
 
     try app.run();
 }
-// fn onErrorWindowExposeHandler(
-//     w: ?*t.TickitWindow,
-//     _: t.TickitEventFlags,
-//     _info: ?*anyopaque,
-//     _: ?*anyopaque,
-// ) callconv(.c) c_int {
-
-//     const info: *t.TickitExposeEventInfo = if (_info != null) @ptrCast(@alignCast(_info)) else {
-//         return 0;
-//     };
-//     const rb = info.rb.?;
-//     t.tickit_renderbuffer_clear(rb);
-
-//     std.debug.print("{any}", .{w});
-//     return 1;
-// }
-// var win: *t.TickitWindow = undefined;
-// pub fn main() void {
-//     const tk = t.tickit_new_stdtty().?;
-//     win = t.tickit_get_rootwin(tk).?;
-
-//     _ = t.tickit_window_bind_event(
-//         win,
-//         t.TICKIT_WINDOW_ON_EXPOSE,
-//         0,
-//         onErrorWindowExposeHandler,
-//         null,
-//     );
-
-//     t.tickit_run(tk);
-
-//     t.tickit_unref(tk);
-// }
