@@ -11,6 +11,7 @@ pub const View = @This();
 const std = @import("std");
 const App = @import("app.zig").App;
 const THROTTLE_INTERVAL = 30;
+const KEY_PRESS_INTERVAL = 50;
 const CURSOR_JUMP = 3;
 const ERROR_RATIO = NormalizedStruct{
     .nx = 0.7,
@@ -177,7 +178,7 @@ fn keyboardClickEventHandler(
     };
 
     const current_time = std.time.milliTimestamp();
-    if (current_time - ctx.view.?.last_key_press_event < THROTTLE_INTERVAL) {
+    if (current_time - ctx.view.?.last_key_press_event < KEY_PRESS_INTERVAL) {
         return 1;
     }
 

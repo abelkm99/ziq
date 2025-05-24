@@ -3,7 +3,7 @@ const std = @import("std");
 const JQResult = struct {
     std_out: []u8,
     std_err: []u8,
-    status: bool = true,
+    status: bool = true, // if true means it was successful
 
     pub fn free(self: *JQResult, alloc: std.mem.Allocator) void {
         alloc.free(self.std_out);
