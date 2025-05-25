@@ -2,6 +2,8 @@
 
 `ziq` is a lightweight command-line tool for processing JSON data on top of jq interactively
 
+https://github.com/user-attachments/assets/f62c4db8-01ba-4b7a-9762-718095f0d4a4
+
 ### Prerequisites
 
 * **jq**: a powerful command-line JSON processor. If you don’t have `jq` installed, you can download it from the [official website](https://stedolan.github.io/jq/download/) or use your package manager:
@@ -61,10 +63,6 @@ ziq < ./data.json
 
 ## MAC OS Error.
 - navigate to privacy and security tab under setting scroll down and make sure to allow running `ziq`.
-
-
-
-https://github.com/user-attachments/assets/f62c4db8-01ba-4b7a-9762-718095f0d4a4
 
 
 
