@@ -1,5 +1,4 @@
 ## ZIQ
-
 `ziq` is a lightweight command-line tool for processing JSON data on top of jq interactively
 
 
