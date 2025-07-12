@@ -22,6 +22,7 @@ https://github.com/user-attachments/assets/f62c4db8-01ba-4b7a-9762-718095f0d4a4
   # Fedora
   sudo dnf install jq
   ```
+  
 
 ### Installation
 
